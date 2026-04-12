@@ -15,7 +15,7 @@ const schema = z.object({
   classId: z.string().min(1, 'Class is required'),
   guardianName: z.string().min(1, 'Guardian name is required'),
   guardianPhone: z.string().min(1, 'Guardian phone is required'),
-  guardianEmail: z.string().email('Invalid email').optional().or(z.literal('')),
+  guardianEmail: z.string().email('Invalid email').optional().or(z.literal('')),  
   guardianAddress: z.string().optional(),
 });
 
@@ -51,15 +51,28 @@ export default function NewStudentPage() {
   const onSubmit = async (data: FormData) => {
     setError('');
     try {
-      const formData = new FormData();
-      Object.entries(data).forEach(([key, value]) => {
-        if (value !== undefined && value !== '') formData.append(key, value as string);
-      });
-      if (photoFile) formData.append('photo', photoFile);
-      await api.post('/students', formData, { headers: { 'Content-Type': 'multipart/form-data' } });
+      // Step 1: Create student with JSON
+      const payload = {
+        ...data,
+        guardianEmail: data.guardianEmail || undefined,
+        guardianAddress: data.guardianAddress || undefined,
+      };
+      const res = await api.post('/students', payload);
+      const studentId = res.data?.id;
+
+      // Step 2: Upload photo separately if provided
+      if (photoFile && studentId) {
+        const formData = new FormData();
+        formData.append('photo', photoFile);
+        await api.post(`/students/${studentId}/photo`, formData, {
+          headers: { 'Content-Type': 'multipart/form-data' },
+        });
+      }
+
       router.push('/dashboard/students');
     } catch (err: unknown) {
-      const message = (err as { response?: { data?: { message?: string } } })?.response?.data?.message || 'Failed to create student';
+      const msgRaw = (err as { response?: { data?: { message?: string | string[] } } })?.response?.data?.message;
+      const message = Array.isArray(msgRaw) ? msgRaw.join(', ') : msgRaw || 'Failed to create student';
       setError(message);
     }
   };
@@ -112,7 +125,7 @@ export default function NewStudentPage() {
           <label className="block text-sm font-medium text-gray-700 mb-1">Class *</label>
           <select {...register('classId')} className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#16a34a]">
             <option value="">Select class…</option>
-            {classes.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+            {classes.map(c => <option key={c.id} value={c.id}>{c.name}</option>)})
           </select>
           {errors.classId && <p className="text-red-500 text-xs mt-1">{errors.classId.message}</p>}
         </div>
