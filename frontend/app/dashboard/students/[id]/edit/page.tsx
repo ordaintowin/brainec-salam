@@ -15,7 +15,7 @@ const schema = z.object({
   classId: z.string().min(1, 'Class is required'),
   guardianName: z.string().min(1, 'Guardian name is required'),
   guardianPhone: z.string().min(1, 'Guardian phone is required'),
-  guardianEmail: z.string().email('Invalid email').optional().or(z.literal('')),
+  guardianEmail: z.string().email('Invalid email').optional().or(z.literal('')), 
   guardianAddress: z.string().optional(),
 });
 
@@ -70,15 +70,27 @@ export default function EditStudentPage() {
   const onSubmit = async (data: FormData) => {
     setError('');
     try {
-      const formData = new FormData();
-      Object.entries(data).forEach(([key, value]) => {
-        if (value !== undefined && value !== '') formData.append(key, value as string);
-      });
-      if (photoFile) formData.append('photo', photoFile);
-      await api.put(`/students/${id}`, formData, { headers: { 'Content-Type': 'multipart/form-data' } });
+      // Step 1: Update student with JSON
+      const payload = {
+        ...data,
+        guardianEmail: data.guardianEmail || undefined,
+        guardianAddress: data.guardianAddress || undefined,
+      };
+      await api.patch(`/students/${id}`, payload);
+
+      // Step 2: Upload photo separately if provided
+      if (photoFile) {
+        const formData = new FormData();
+        formData.append('photo', photoFile);
+        await api.post(`/students/${id}/photo`, formData, {
+          headers: { 'Content-Type': 'multipart/form-data' },
+        });
+      }
+
       router.push(`/dashboard/students/${id}`);
     } catch (err: unknown) {
-      const message = (err as { response?: { data?: { message?: string } } })?.response?.data?.message || 'Failed to update student';
+      const msgRaw = (err as { response?: { data?: { message?: string | string[] } } })?.response?.data?.message;
+      const message = Array.isArray(msgRaw) ? msgRaw.join(', ') : msgRaw || 'Failed to update student';
       setError(message);
     }
   };
