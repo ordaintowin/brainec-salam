@@ -35,9 +35,15 @@ export default function StudentsPage() {
   const fetchStudents = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await api.get('/students', { params: { search, page, limit: 20 } });
-      setStudents(res.data.students || res.data);
-      setTotalPages(res.data.totalPages || 1);
+      const res = await api.get('/students', { params: { q: search, page, limit: 20 } });
+      const data = res.data;
+      if (Array.isArray(data)) {
+        setStudents(data);
+        setTotalPages(1);
+      } else {
+        setStudents(Array.isArray(data.students) ? data.students : []);
+        setTotalPages(data.totalPages || 1);
+      }
     } catch {
       setStudents([]);
     } finally {
