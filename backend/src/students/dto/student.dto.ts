@@ -7,8 +7,8 @@ import {
 } from 'class-validator';
 
 export enum Gender {
-  Male = 'Male',
-  Female = 'Female',
+  MALE = 'MALE',
+  FEMALE = 'FEMALE',
 }
 
 export class CreateStudentDto {
