@@ -31,9 +31,15 @@ export default function TeachersPage() {
   const fetchTeachers = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await api.get('/teachers', { params: { search, page, limit: 20 } });
-      setTeachers(res.data?.teachers || res.data || []);
-      setTotalPages(res.data?.totalPages || 1);
+      const res = await api.get('/teachers', { params: { q: search, page, limit: 20 } });
+      const data = res.data;
+      if (Array.isArray(data)) {
+        setTeachers(data);
+        setTotalPages(1);
+      } else {
+        setTeachers(Array.isArray(data.teachers) ? data.teachers : []);
+        setTotalPages(data.totalPages || 1);
+      }
     } catch {
       setTeachers([]);
     } finally {
