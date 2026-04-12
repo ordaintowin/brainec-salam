@@ -128,8 +128,8 @@ export default function TeachersPage() {
         </div>
       ) : (
         <DataTable
-          columns={columns as Parameters<typeof DataTable>[0]['columns']}
-          data={teachers as Record<string, unknown>[]}
+          columns={columns}
+          data={teachers}
           currentPage={page}
           totalPages={totalPages}
           onPageChange={setPage}

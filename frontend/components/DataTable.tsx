@@ -1,28 +1,29 @@
 'use client';
+/* eslint-disable @typescript-eslint/no-explicit-any */
 
-interface Column<T> {
+export interface Column {
   header: string;
-  accessor?: keyof T;
-  cell?: (row: T) => React.ReactNode;
+  accessor?: string;
+  cell?: (row: any) => React.ReactNode;
 }
 
-interface DataTableProps<T> {
-  columns: Column<T>[];
-  data: T[];
+interface DataTableProps {
+  columns: Column[];
+  data: any[];
   currentPage?: number;
   totalPages?: number;
   onPageChange?: (page: number) => void;
   emptyMessage?: string;
 }
 
-export default function DataTable<T extends Record<string, unknown>>({
+export default function DataTable({
   columns,
   data,
   currentPage = 1,
   totalPages = 1,
   onPageChange,
   emptyMessage = 'No records found.',
-}: DataTableProps<T>) {
+}: DataTableProps) {
   return (
     <div>
       <div className="overflow-x-auto rounded-lg border border-gray-200">

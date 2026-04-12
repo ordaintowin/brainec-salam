@@ -159,8 +159,8 @@ export default function StudentsPage() {
         </div>
       ) : (
         <DataTable
-          columns={columns as Parameters<typeof DataTable>[0]['columns']}
-          data={students as Record<string, unknown>[]}
+          columns={columns}
+          data={students}
           currentPage={page}
           totalPages={totalPages}
           onPageChange={setPage}
