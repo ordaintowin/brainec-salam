@@ -167,18 +167,17 @@ export class StudentsService {
 
   /**
    * Count weekdays (Mon-Fri) between two dates inclusive.
+   * Uses millisecond-based day stepping to avoid any Date mutation edge cases.
    */
   private countWeekdays(start: Date, end: Date): number {
     let count = 0;
-    const current = new Date(start);
-    current.setUTCHours(0, 0, 0, 0);
-    const endDate = new Date(end);
-    endDate.setUTCHours(0, 0, 0, 0);
+    const startMs = new Date(start).setUTCHours(0, 0, 0, 0);
+    const endMs = new Date(end).setUTCHours(0, 0, 0, 0);
+    const oneDay = 86_400_000; // 24 * 60 * 60 * 1000
 
-    while (current <= endDate) {
-      const day = current.getUTCDay();
+    for (let ms = startMs; ms <= endMs; ms += oneDay) {
+      const day = new Date(ms).getUTCDay();
       if (day >= 1 && day <= 5) count++;
-      current.setUTCDate(current.getUTCDate() + 1);
     }
     return count;
   }
@@ -232,6 +231,7 @@ export class StudentsService {
         absent: counts.absent,
         late: counts.late,
         totalMarked,
+        // Late counts toward attendance (same business rule used across the app)
         attendancePercent: totalMarked > 0 ? Math.round(((counts.present + counts.late) / totalMarked) * 100) : 0,
       };
     });
