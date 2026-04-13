@@ -14,6 +14,7 @@ import { FinanceModule } from './finance/finance.module';
 import { AttendanceModule } from './attendance/attendance.module';
 import { LogsModule } from './logs/logs.module';
 import { ArchiveModule } from './archive/archive.module';
+import { DashboardModule } from './dashboard/dashboard.module';
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
 import { RolesGuard } from './common/guards/roles.guard';
 import { ActivityLogInterceptor } from './common/interceptors/activity-log.interceptor';
@@ -32,6 +33,7 @@ import { ActivityLogInterceptor } from './common/interceptors/activity-log.inter
     AttendanceModule,
     LogsModule,
     ArchiveModule,
+    DashboardModule,
   ],
   controllers: [AppController],
   providers: [

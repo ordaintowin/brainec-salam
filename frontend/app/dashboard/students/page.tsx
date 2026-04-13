@@ -1,14 +1,14 @@
 'use client';
 import { useEffect, useState, useCallback } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { Plus, Eye, Pencil, Trash2 } from 'lucide-react';
+import { Plus, Eye, Pencil, Trash2, Download } from 'lucide-react';
 import api from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import DataTable from '@/components/DataTable';
 import LiveSearch from '@/components/LiveSearch';
 import ConfirmModal from '@/components/ConfirmModal';
 import InitialsAvatar from '@/components/InitialsAvatar';
-import { formatDate } from '@/lib/utils';
+import { formatDate, exportToCSV } from '@/lib/utils';
 
 interface Student {
   id: string;
@@ -77,6 +77,25 @@ export default function StudentsPage() {
   };
 
   const canManage = user?.role === 'HEADMISTRESS' || user?.role === 'ADMIN';
+
+  const handleExport = async () => {
+    try {
+      const res = await api.get('/students', { params: { q: search, page: 1, limit: 10000 } });
+      const rows = (res.data?.data || res.data || []) as Student[];
+      exportToCSV(
+        rows.map(s => ({
+          'Student ID': s.studentId,
+          'First Name': s.firstName,
+          'Last Name': s.lastName,
+          'Class': s.class?.name || '',
+          'Guardian Phone': s.guardianPhone,
+        })),
+        'students',
+      );
+    } catch {
+      // silent
+    }
+  };
 
   const columns = [
     {
@@ -147,13 +166,22 @@ export default function StudentsPage() {
           <p className="text-gray-500 text-sm mt-1">Manage all enrolled students</p>
         </div>
         {canManage && (
-          <button
-            onClick={() => router.push('/dashboard/students/new')}
-            className="flex items-center gap-2 bg-[#16a34a] hover:bg-green-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors"
-          >
-            <Plus className="w-4 h-4" />
-            Add Student
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={handleExport}
+              className="flex items-center gap-2 border border-gray-300 text-gray-700 hover:bg-gray-50 px-4 py-2 rounded-lg text-sm font-medium transition-colors"
+            >
+              <Download className="w-4 h-4" />
+              Export CSV
+            </button>
+            <button
+              onClick={() => router.push('/dashboard/students/new')}
+              className="flex items-center gap-2 bg-[#16a34a] hover:bg-green-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors"
+            >
+              <Plus className="w-4 h-4" />
+              Add Student
+            </button>
+          </div>
         )}
       </div>
 

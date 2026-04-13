@@ -78,13 +78,17 @@ export default function EditStudentPage() {
       };
       await api.patch(`/students/${id}`, payload);
 
-      // Step 2: Upload photo separately if provided
+      // Step 2: Upload photo separately if provided — failure does not block success
       if (photoFile) {
-        const formData = new FormData();
-        formData.append('photo', photoFile);
-        await api.post(`/students/${id}/photo`, formData, {
-          headers: { 'Content-Type': 'multipart/form-data' },
-        });
+        try {
+          const formData = new FormData();
+          formData.append('photo', photoFile);
+          await api.post(`/students/${id}/photo`, formData, {
+            headers: { 'Content-Type': 'multipart/form-data' },
+          });
+        } catch {
+          // photo upload failed (e.g. Cloudinary not configured) — student still updated
+        }
       }
 
       router.push(`/dashboard/students/${id}`);

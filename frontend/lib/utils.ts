@@ -24,3 +24,35 @@ export function formatDateTime(date: string | Date): string {
     hour: '2-digit', minute: '2-digit',
   });
 }
+
+/**
+ * Export an array of objects as a CSV file (opens in Excel).
+ * @param rows   Array of plain objects — all values are stringified
+ * @param filename  File name without extension
+ */
+export function exportToCSV(rows: Record<string, unknown>[], filename: string): void {
+  if (!rows.length) return;
+
+  const escape = (val: unknown): string => {
+    const s = val === null || val === undefined ? '' : String(val);
+    // Wrap in quotes if it contains comma, newline, or double-quote
+    if (s.includes(',') || s.includes('\n') || s.includes('"')) {
+      return `"${s.replace(/"/g, '""')}"`;
+    }
+    return s;
+  };
+
+  const headers = Object.keys(rows[0]);
+  const csvRows = [
+    headers.map(escape).join(','),
+    ...rows.map(row => headers.map(h => escape(row[h])).join(',')),
+  ];
+
+  const blob = new Blob([csvRows.join('\r\n')], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `${filename}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+}

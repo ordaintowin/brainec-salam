@@ -1,13 +1,14 @@
 'use client';
 import { useEffect, useState, useCallback } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { Plus, Eye, Pencil } from 'lucide-react';
+import { Plus, Eye, Pencil, Trash2, Download } from 'lucide-react';
 import api from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import DataTable from '@/components/DataTable';
 import LiveSearch from '@/components/LiveSearch';
 import InitialsAvatar from '@/components/InitialsAvatar';
-import { formatDate } from '@/lib/utils';
+import ConfirmModal from '@/components/ConfirmModal';
+import { formatDate, exportToCSV } from '@/lib/utils';
 
 interface Teacher {
   id: string;
@@ -29,6 +30,9 @@ export default function TeachersPage() {
   const [totalPages, setTotalPages] = useState(1);
   const [loading, setLoading] = useState(true);
   const [successMessage, setSuccessMessage] = useState(searchParams.get('created') === '1' ? 'Teacher created successfully!' : '');
+  const [archiveModal, setArchiveModal] = useState<{ open: boolean; teacher: Teacher | null }>({ open: false, teacher: null });
+  const [archiveReason, setArchiveReason] = useState('');
+  const [archiveLoading, setArchiveLoading] = useState(false);
 
   const fetchTeachers = useCallback(async () => {
     setLoading(true);
@@ -58,6 +62,43 @@ export default function TeachersPage() {
   }, [search]);
 
   const canManage = user?.role === 'HEADMISTRESS' || user?.role === 'ADMIN';
+
+  const handleExport = async () => {
+    try {
+      const res = await api.get('/teachers', { params: { q: search, page: 1, limit: 10000 } });
+      const rows = (res.data?.data || res.data || []) as Teacher[];
+      exportToCSV(
+        rows.map(t => ({
+          'Employee ID': t.employeeId || '',
+          'Name': t.user.name,
+          'Email': t.user.email,
+          'Class': t.class?.name || '',
+          'Qualification': t.qualification || '',
+          'Phone': t.phone || '',
+          'Join Date': t.joinDate ? formatDate(t.joinDate) : '',
+        })),
+        'teachers',
+      );
+    } catch {
+      // silent
+    }
+  };
+
+  const handleArchive = async () => {
+    if (!archiveModal.teacher) return;
+    setArchiveLoading(true);
+    try {
+      await api.delete(`/teachers/${archiveModal.teacher.id}`, { data: { archiveReason } });
+      setArchiveModal({ open: false, teacher: null });
+      setArchiveReason('');
+      setSuccessMessage('Teacher archived successfully.');
+      fetchTeachers();
+    } catch {
+      // silent
+    } finally {
+      setArchiveLoading(false);
+    }
+  };
 
   const columns = [
     {
@@ -96,12 +137,21 @@ export default function TeachersPage() {
             <Eye className="w-4 h-4" />
           </button>
           {canManage && (
-            <button
-              onClick={() => router.push(`/dashboard/teachers/${row.id}/edit`)}
-              className="p-1.5 text-gray-600 hover:bg-gray-50 rounded"
-            >
-              <Pencil className="w-4 h-4" />
-            </button>
+            <>
+              <button
+                onClick={() => router.push(`/dashboard/teachers/${row.id}/edit`)}
+                className="p-1.5 text-gray-600 hover:bg-gray-50 rounded"
+              >
+                <Pencil className="w-4 h-4" />
+              </button>
+              <button
+                onClick={() => setArchiveModal({ open: true, teacher: row })}
+                className="p-1.5 text-red-500 hover:bg-red-50 rounded"
+                title="Archive teacher"
+              >
+                <Trash2 className="w-4 h-4" />
+              </button>
+            </>
           )}
         </div>
       ),
@@ -116,13 +166,22 @@ export default function TeachersPage() {
           <p className="text-gray-500 text-sm mt-1">Manage school staff</p>
         </div>
         {canManage && (
-          <button
-            onClick={() => router.push('/dashboard/teachers/new')}
-            className="flex items-center gap-2 bg-[#16a34a] hover:bg-green-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors"
-          >
-            <Plus className="w-4 h-4" />
-            Add Teacher
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={handleExport}
+              className="flex items-center gap-2 border border-gray-300 text-gray-700 hover:bg-gray-50 px-4 py-2 rounded-lg text-sm font-medium transition-colors"
+            >
+              <Download className="w-4 h-4" />
+              Export CSV
+            </button>
+            <button
+              onClick={() => router.push('/dashboard/teachers/new')}
+              className="flex items-center gap-2 bg-[#16a34a] hover:bg-green-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors"
+            >
+              <Plus className="w-4 h-4" />
+              Add Teacher
+            </button>
+          </div>
         )}
       </div>
 
@@ -151,6 +210,19 @@ export default function TeachersPage() {
           emptyMessage="No teachers found."
         />
       )}
+
+      <ConfirmModal
+        isOpen={archiveModal.open}
+        onCancel={() => { setArchiveModal({ open: false, teacher: null }); setArchiveReason(''); }}
+        onConfirm={handleArchive}
+        title="Archive Teacher"
+        message={`Are you sure you want to archive ${archiveModal.teacher?.user.name}? They will no longer appear in the active teachers list.`}
+        confirmLabel="Archive"
+        showReasonInput
+        reason={archiveReason}
+        onReasonChange={setArchiveReason}
+        isLoading={archiveLoading}
+      />
     </div>
   );
 }

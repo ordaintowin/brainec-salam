@@ -1,7 +1,8 @@
 'use client';
 import { useEffect, useState, useCallback } from 'react';
+import { Download } from 'lucide-react';
 import api from '@/lib/api';
-import { formatDateTime } from '@/lib/utils';
+import { formatDateTime, exportToCSV } from '@/lib/utils';
 
 interface ActivityLog {
   id: string;
@@ -60,9 +61,28 @@ export default function LogsPage() {
 
   return (
     <div className="p-8">
-      <div className="mb-6">
-        <h1 className="text-2xl font-bold text-gray-900">Activity Logs</h1>
-        <p className="text-gray-500 text-sm mt-1">Read-only audit trail of all system activity</p>
+      <div className="flex items-center justify-between mb-6">
+        <div>
+          <h1 className="text-2xl font-bold text-gray-900">Activity Logs</h1>
+          <p className="text-gray-500 text-sm mt-1">Read-only audit trail of all system activity</p>
+        </div>
+        <button
+          onClick={() => exportToCSV(
+            logs.map(l => ({
+              'Date': formatDateTime(l.createdAt),
+              'User': l.user?.name || '',
+              'Email': l.user?.email || '',
+              'Action': l.action,
+              'Description': l.description,
+              'IP Address': l.ipAddress || '',
+            })),
+            'activity-logs',
+          )}
+          className="flex items-center gap-2 border border-gray-300 text-gray-700 hover:bg-gray-50 px-4 py-2 rounded-lg text-sm font-medium"
+        >
+          <Download className="w-4 h-4" />
+          Export CSV
+        </button>
       </div>
 
       {/* Date filters */}

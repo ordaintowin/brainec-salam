@@ -66,12 +66,26 @@ export default function EditTeacherPage() {
   const onSubmit = async (data: FormData) => {
     setError('');
     try {
-      const formData = new FormData();
+      // Step 1: Update teacher info as JSON (PATCH)
+      const payload: Record<string, unknown> = {};
       Object.entries(data).forEach(([key, value]) => {
-        if (value !== undefined && value !== '') formData.append(key, value as string);
+        if (value !== undefined && value !== '') payload[key] = value;
       });
-      if (photoFile) formData.append('photo', photoFile);
-      await api.put(`/teachers/${id}`, formData, { headers: { 'Content-Type': 'multipart/form-data' } });
+      await api.patch(`/teachers/${id}`, payload);
+
+      // Step 2: Upload photo separately if provided — failure does not block success
+      if (photoFile) {
+        try {
+          const formData = new FormData();
+          formData.append('photo', photoFile);
+          await api.post(`/teachers/${id}/photo`, formData, {
+            headers: { 'Content-Type': 'multipart/form-data' },
+          });
+        } catch {
+          // photo upload failed (e.g. Cloudinary not configured) — teacher still updated
+        }
+      }
+
       router.push(`/dashboard/teachers/${id}`);
     } catch (err: unknown) {
       const message = (err as { response?: { data?: { message?: string } } })?.response?.data?.message || 'Failed to update teacher';
