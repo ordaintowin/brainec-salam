@@ -164,4 +164,119 @@ export class StudentsService {
       select: { id: true, photoUrl: true },
     });
   }
+
+  /**
+   * Count weekdays (Mon-Fri) between two dates inclusive.
+   */
+  private countWeekdays(start: Date, end: Date): number {
+    let count = 0;
+    const current = new Date(start);
+    current.setUTCHours(0, 0, 0, 0);
+    const endDate = new Date(end);
+    endDate.setUTCHours(0, 0, 0, 0);
+
+    while (current <= endDate) {
+      const day = current.getUTCDay();
+      if (day >= 1 && day <= 5) count++;
+      current.setUTCDate(current.getUTCDate() + 1);
+    }
+    return count;
+  }
+
+  /**
+   * Get attendance history summary per term for a student.
+   * Returns each term with total school days and present/absent/late counts.
+   */
+  async getAttendanceHistory(studentId: string) {
+    const student = await this.prisma.student.findUnique({ where: { id: studentId } });
+    if (!student) throw new NotFoundException('Student not found');
+
+    // Get all terms ordered by most recent first
+    const terms = await this.prisma.term.findMany({
+      orderBy: { startDate: 'desc' },
+    });
+
+    // Get all attendance records for this student
+    const attendances = await this.prisma.attendance.findMany({
+      where: { studentId },
+      select: { termId: true, status: true },
+    });
+
+    // Build a map of termId -> counts
+    const termCounts: Record<string, { present: number; absent: number; late: number }> = {};
+    for (const att of attendances) {
+      const tid = att.termId || '__no_term__';
+      if (!termCounts[tid]) termCounts[tid] = { present: 0, absent: 0, late: 0 };
+      if (att.status === 'PRESENT') termCounts[tid].present++;
+      else if (att.status === 'ABSENT') termCounts[tid].absent++;
+      else if (att.status === 'LATE') termCounts[tid].late++;
+    }
+
+    const today = new Date();
+    today.setUTCHours(0, 0, 0, 0);
+
+    const result = terms.map((term) => {
+      const counts = termCounts[term.id] || { present: 0, absent: 0, late: 0 };
+      const endForCount = term.status === 'CLOSED' || term.endDate <= today ? term.endDate : today;
+      const totalSchoolDays = this.countWeekdays(term.startDate, endForCount);
+      const totalMarked = counts.present + counts.absent + counts.late;
+
+      return {
+        termId: term.id,
+        termName: term.name,
+        status: term.status,
+        startDate: term.startDate,
+        endDate: term.endDate,
+        totalSchoolDays,
+        present: counts.present,
+        absent: counts.absent,
+        late: counts.late,
+        totalMarked,
+        attendancePercent: totalMarked > 0 ? Math.round(((counts.present + counts.late) / totalMarked) * 100) : 0,
+      };
+    });
+
+    return result;
+  }
+
+  /**
+   * Get paginated attendance detail for a student in a specific term,
+   * optionally filtered by status.
+   */
+  async getAttendanceDetail(
+    studentId: string,
+    termId: string,
+    status?: string,
+    page = 1,
+    limit = 10,
+  ) {
+    const student = await this.prisma.student.findUnique({ where: { id: studentId } });
+    if (!student) throw new NotFoundException('Student not found');
+
+    const where: any = { studentId, termId };
+    if (status) where.status = status;
+
+    const skip = (page - 1) * limit;
+
+    const [data, total] = await Promise.all([
+      this.prisma.attendance.findMany({
+        where,
+        skip,
+        take: limit,
+        orderBy: { date: 'desc' },
+        select: {
+          id: true,
+          date: true,
+          status: true,
+          notes: true,
+        },
+      }),
+      this.prisma.attendance.count({ where }),
+    ]);
+
+    return {
+      data,
+      meta: { total, page, limit, totalPages: Math.ceil(total / limit) },
+    };
+  }
 }
