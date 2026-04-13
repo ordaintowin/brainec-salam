@@ -1,6 +1,6 @@
 'use client';
 import { useEffect, useState, useCallback } from 'react';
-import { Plus, X, Loader2, Lock, FileText } from 'lucide-react';
+import { Plus, X, Loader2, Lock, FileText, Pencil } from 'lucide-react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
@@ -62,6 +62,16 @@ export default function TermsPage() {
     formState: { errors, isSubmitting },
   } = useForm<TermForm>({ resolver: zodResolver(termSchema) });
 
+  const [editModal, setEditModal] = useState<{ open: boolean; term: Term | null }>({ open: false, term: null });
+  const [editError, setEditError] = useState('');
+  const {
+    register: registerEdit,
+    handleSubmit: handleEditSubmit,
+    reset: resetEditForm,
+    setValue: setEditValue,
+    formState: { errors: editErrors, isSubmitting: editSubmitting },
+  } = useForm<TermForm>({ resolver: zodResolver(termSchema) });
+
   const fetchTerms = useCallback(async () => {
     try {
       const res = await api.get('/terms');
@@ -114,6 +124,37 @@ export default function TermsPage() {
     } finally {
       setReportLoading(false);
     }
+  };
+
+  const openEditModal = (term: Term) => {
+    setEditError('');
+    setEditValue('name', term.name);
+    setEditValue('startDate', term.startDate.split('T')[0]);
+    setEditValue('endDate', term.endDate.split('T')[0]);
+    setEditModal({ open: true, term });
+  };
+
+  const onEdit = async (data: TermForm) => {
+    if (!editModal.term) return;
+    setEditError('');
+    try {
+      await api.patch(`/terms/${editModal.term.id}`, data);
+      setEditModal({ open: false, term: null });
+      resetEditForm();
+      fetchTerms();
+    } catch (err: unknown) {
+      const msg = (err as { response?: { data?: { message?: string } } })?.response?.data?.message || 'Failed to update term';
+      setEditError(msg);
+    }
+  };
+
+  // Check if a term can be closed (end date must be <= today)
+  const canCloseTerm = (term: Term) => {
+    const now = new Date();
+    now.setUTCHours(0, 0, 0, 0);
+    const endDate = new Date(term.endDate);
+    endDate.setUTCHours(0, 0, 0, 0);
+    return endDate.getTime() <= now.getTime();
   };
 
   return (
@@ -169,14 +210,24 @@ export default function TermsPage() {
                   Report
                 </button>
                 {term.status === 'ACTIVE' && (
-                  <button
-                    onClick={() => closeTerm(term.id)}
-                    disabled={closing === term.id}
-                    className="flex items-center gap-1.5 px-3 py-1.5 text-sm bg-red-50 text-red-700 hover:bg-red-100 border border-red-200 rounded-lg disabled:opacity-60"
-                  >
-                    {closing === term.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <Lock className="w-4 h-4" />}
-                    Close Term
-                  </button>
+                  <>
+                    <button
+                      onClick={() => openEditModal(term)}
+                      className="flex items-center gap-1.5 px-3 py-1.5 text-sm border border-gray-300 text-gray-700 hover:bg-gray-50 rounded-lg"
+                    >
+                      <Pencil className="w-4 h-4" />
+                      Edit
+                    </button>
+                    <button
+                      onClick={() => closeTerm(term.id)}
+                      disabled={closing === term.id || !canCloseTerm(term)}
+                      title={!canCloseTerm(term) ? `Cannot close until end date (${formatDate(term.endDate)})` : 'Close this term'}
+                      className="flex items-center gap-1.5 px-3 py-1.5 text-sm bg-red-50 text-red-700 hover:bg-red-100 border border-red-200 rounded-lg disabled:opacity-60 disabled:cursor-not-allowed"
+                    >
+                      {closing === term.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <Lock className="w-4 h-4" />}
+                      Close Term
+                    </button>
+                  </>
                 )}
               </div>
             </div>
@@ -318,6 +369,65 @@ export default function TermsPage() {
                 >
                   {isSubmitting && <Loader2 className="w-4 h-4 animate-spin" />}
                   Create Term
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Edit Term Modal */}
+      {editModal.open && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <div className="absolute inset-0 bg-black/50" onClick={() => setEditModal({ open: false, term: null })} />
+          <div className="relative bg-white rounded-xl shadow-xl p-6 w-full max-w-md mx-4">
+            <div className="flex items-center justify-between mb-5">
+              <h2 className="text-lg font-semibold text-gray-900">Edit Term</h2>
+              <button onClick={() => setEditModal({ open: false, term: null })} className="text-gray-400 hover:text-gray-600"><X className="w-5 h-5" /></button>
+            </div>
+
+            {editError && (
+              <div className="mb-4 p-3 bg-red-50 border border-red-200 text-red-700 rounded-lg text-sm">{editError}</div>
+            )}
+
+            <form onSubmit={handleEditSubmit(onEdit)} className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Term Name *</label>
+                <input
+                  {...registerEdit('name')}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#16a34a]"
+                />
+                {editErrors.name && <p className="text-red-500 text-xs mt-1">{editErrors.name.message}</p>}
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Start Date *</label>
+                  <input type="date" {...registerEdit('startDate')} className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#16a34a]" />
+                  {editErrors.startDate && <p className="text-red-500 text-xs mt-1">{editErrors.startDate.message}</p>}
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">End Date *</label>
+                  <input type="date" {...registerEdit('endDate')} className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#16a34a]" />
+                  {editErrors.endDate && <p className="text-red-500 text-xs mt-1">{editErrors.endDate.message}</p>}
+                </div>
+              </div>
+
+              <div className="flex gap-3 justify-end">
+                <button
+                  type="button"
+                  onClick={() => setEditModal({ open: false, term: null })}
+                  className="px-4 py-2 text-sm text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={editSubmitting}
+                  className="px-4 py-2 text-sm text-white bg-[#16a34a] hover:bg-green-700 rounded-lg disabled:opacity-60 flex items-center gap-2"
+                >
+                  {editSubmitting && <Loader2 className="w-4 h-4 animate-spin" />}
+                  Save Changes
                 </button>
               </div>
             </form>
