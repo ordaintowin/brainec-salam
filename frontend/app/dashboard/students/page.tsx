@@ -41,8 +41,8 @@ export default function StudentsPage() {
         setStudents(data);
         setTotalPages(1);
       } else {
-        setStudents(Array.isArray(data.students) ? data.students : []);
-        setTotalPages(data.totalPages || 1);
+        setStudents(Array.isArray(data.data) ? data.data : []);
+        setTotalPages(data.meta?.totalPages || 1);
       }
     } catch {
       setStudents([]);
@@ -63,7 +63,7 @@ export default function StudentsPage() {
     if (!deleteTarget) return;
     setDeleteLoading(true);
     try {
-      await api.delete(`/students/${deleteTarget.id}`, { data: { reason: archiveReason } });
+      await api.delete(`/students/${deleteTarget.id}`, { data: { archiveReason } });
       setDeleteTarget(null);
       setArchiveReason('');
       fetchStudents();

@@ -75,7 +75,7 @@ export default function ClassesPage() {
     setFormError('');
     try {
       if (editTarget) {
-        await api.put(`/classes/${editTarget.id}`, data);
+        await api.patch(`/classes/${editTarget.id}`, data);
       } else {
         await api.post('/classes', data);
       }

@@ -6,7 +6,7 @@ import { formatDateTime } from '@/lib/utils';
 interface ActivityLog {
   id: string;
   createdAt: string;
-  admin?: { name: string; email: string };
+  user?: { name: string; email: string };
   action: string;
   description: string;
   ipAddress?: string;
@@ -27,12 +27,12 @@ export default function LogsPage() {
         params: {
           page,
           limit: 30,
-          fromDate: fromDate || undefined,
-          toDate: toDate || undefined,
+          startDate: fromDate || undefined,
+          endDate: toDate || undefined,
         },
       });
-      setLogs(res.data?.logs || res.data || []);
-      setTotalPages(res.data?.totalPages || 1);
+      setLogs(res.data?.data || []);
+      setTotalPages(res.data?.meta?.totalPages || 1);
     } catch {
       setLogs([]);
     } finally {
@@ -122,8 +122,8 @@ export default function LogsPage() {
                     <tr key={log.id} className="hover:bg-gray-50">
                       <td className="px-4 py-3 text-gray-400 text-xs whitespace-nowrap">{formatDateTime(log.createdAt)}</td>
                       <td className="px-4 py-3">
-                        <p className="font-medium text-gray-700">{log.admin?.name || '—'}</p>
-                        {log.admin?.email && <p className="text-xs text-gray-400">{log.admin.email}</p>}
+                        <p className="font-medium text-gray-700">{log.user?.name || '—'}</p>
+                        {log.user?.email && <p className="text-xs text-gray-400">{log.user.email}</p>}
                       </td>
                       <td className="px-4 py-3">
                         <span className={`px-2.5 py-0.5 rounded-full text-xs font-medium ${

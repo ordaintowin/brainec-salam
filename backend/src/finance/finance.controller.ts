@@ -18,13 +18,13 @@ import { Role } from '@prisma/client';
 export class FinanceController {
   constructor(private readonly financeService: FinanceService) {}
 
-  @Post('orders')
+  @Post('fee-orders')
   @Roles(Role.HEADMISTRESS, Role.ADMIN)
   createFeeOrder(@Body() dto: CreateFeeOrderDto, @CurrentUser() user: any) {
     return this.financeService.createFeeOrder(dto, user.id);
   }
 
-  @Get('orders')
+  @Get('fee-orders')
   getFeeOrders(
     @Query('page', new DefaultValuePipe(1), ParseIntPipe) page: number,
     @Query('limit', new DefaultValuePipe(10), ParseIntPipe) limit: number,
