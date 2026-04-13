@@ -13,6 +13,7 @@ import { formatDate, exportToCSV } from '@/lib/utils';
 interface Teacher {
   id: string;
   employeeId?: string;
+  photoUrl?: string;
   user: { name: string; email: string; photoUrl?: string };
   class?: { name: string };
   qualification?: string;
@@ -105,9 +106,9 @@ export default function TeachersPage() {
       header: 'Teacher',
       cell: (row: Teacher) => (
         <div className="flex items-center gap-3">
-          {row.user.photoUrl ? (
+          {(row.photoUrl || row.user.photoUrl) ? (
             // eslint-disable-next-line @next/next/no-img-element
-            <img src={row.user.photoUrl} alt={row.user.name} className="w-8 h-8 rounded-full object-cover" />
+            <img src={row.photoUrl || row.user.photoUrl} alt={row.user.name} className="w-8 h-8 rounded-full object-cover" />
           ) : (
             <InitialsAvatar name={row.user.name} size="sm" />
           )}

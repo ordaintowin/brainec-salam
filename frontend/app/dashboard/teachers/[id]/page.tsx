@@ -14,6 +14,7 @@ interface Teacher {
   address?: string;
   qualification?: string;
   joinDate?: string;
+  photoUrl?: string;
   user: { name: string; email: string; photoUrl?: string };
   class?: { name: string };
 }
@@ -73,7 +74,7 @@ export default function TeacherDetailPage() {
 
       <ProfileCard
         name={teacher.user.name}
-        photoUrl={teacher.user.photoUrl}
+        photoUrl={teacher.photoUrl || teacher.user.photoUrl}
         idBadge={teacher.employeeId ? `Employee ID: ${teacher.employeeId}` : undefined}
         subtitle={teacher.class ? `Class: ${teacher.class.name}` : undefined}
         details={[
