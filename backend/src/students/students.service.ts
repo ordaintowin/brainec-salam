@@ -122,6 +122,39 @@ export class StudentsService {
     });
   }
 
+  async findAllArchived(page = 1, limit = 20) {
+    const skip = (page - 1) * limit;
+    const [data, total] = await Promise.all([
+      this.prisma.student.findMany({
+        where: { isArchived: true },
+        skip,
+        take: limit,
+        orderBy: { archivedAt: 'desc' },
+        include: { class: { select: { id: true, name: true } } },
+      }),
+      this.prisma.student.count({ where: { isArchived: true } }),
+    ]);
+    return {
+      data,
+      meta: { total, page, limit, totalPages: Math.ceil(total / limit) },
+    };
+  }
+
+  async restore(id: string) {
+    const student = await this.prisma.student.findUnique({ where: { id } });
+    if (!student) throw new NotFoundException('Student not found');
+    return this.prisma.student.update({
+      where: { id },
+      data: {
+        isArchived: false,
+        archivedAt: null,
+        archivedBy: null,
+        archiveReason: null,
+      },
+      include: { class: { select: { id: true, name: true } } },
+    });
+  }
+
   async uploadPhoto(id: string, file: Express.Multer.File) {
     await this.findOne(id);
     const result = await this.cloudinary.uploadBuffer(file.buffer, 'students');

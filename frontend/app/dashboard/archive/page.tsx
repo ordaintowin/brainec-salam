@@ -40,8 +40,8 @@ export default function ArchivePage() {
         api.get('/students/archived'),
         api.get('/teachers/archived'),
       ]);
-      setArchivedStudents(sRes.data?.students || sRes.data || []);
-      setArchivedTeachers(tRes.data?.teachers || tRes.data || []);
+      setArchivedStudents(Array.isArray(sRes.data?.data) ? sRes.data.data : (Array.isArray(sRes.data) ? sRes.data : []));
+      setArchivedTeachers(Array.isArray(tRes.data?.data) ? tRes.data.data : (Array.isArray(tRes.data) ? tRes.data : []));
     } catch {
       setArchivedStudents([]);
       setArchivedTeachers([]);

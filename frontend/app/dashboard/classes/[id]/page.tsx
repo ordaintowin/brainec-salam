@@ -17,21 +17,25 @@ interface SchoolClass {
   id: string;
   name: string;
   description?: string;
-  teacher?: { user: { name: string; email: string } };
-  students?: Student[];
-  _count?: { students: number };
+  teachers?: { user: { name: string; email: string } }[];
+  studentCount?: number;
 }
 
 export default function ClassDetailPage() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
   const [cls, setCls] = useState<SchoolClass | null>(null);
+  const [students, setStudents] = useState<Student[]>([]);
   const [loading, setLoading] = useState(true);
 
   const fetchClass = useCallback(async () => {
     try {
-      const res = await api.get(`/classes/${id}`);
-      setCls(res.data);
+      const [clsRes, studRes] = await Promise.all([
+        api.get(`/classes/${id}`),
+        api.get(`/classes/${id}/students`, { params: { limit: 100 } }),
+      ]);
+      setCls(clsRes.data);
+      setStudents(Array.isArray(studRes.data?.data) ? studRes.data.data : []);
     } catch {
       // silent
     } finally {
@@ -72,11 +76,11 @@ export default function ClassDetailPage() {
           </div>
           <div>
             <p className="text-xs text-gray-400 uppercase tracking-wider">Total Students</p>
-            <p className="text-sm font-medium text-gray-800 mt-1">{cls._count?.students ?? cls.students?.length ?? 0}</p>
+            <p className="text-sm font-medium text-gray-800 mt-1">{cls.studentCount ?? students.length}</p>
           </div>
           <div>
             <p className="text-xs text-gray-400 uppercase tracking-wider">Assigned Teacher</p>
-            <p className="text-sm font-medium text-gray-800 mt-1">{cls.teacher?.user.name || 'Not assigned'}</p>
+            <p className="text-sm font-medium text-gray-800 mt-1">{cls.teachers?.[0]?.user.name || 'Not assigned'}</p>
           </div>
           <div>
             <p className="text-xs text-gray-400 uppercase tracking-wider">Description</p>
@@ -88,7 +92,7 @@ export default function ClassDetailPage() {
       {/* Student Roster */}
       <div className="bg-white rounded-xl border border-gray-200 p-6">
         <h2 className="text-base font-semibold text-gray-800 mb-4">Student Roster</h2>
-        {!cls.students || cls.students.length === 0 ? (
+        {students.length === 0 ? (
           <p className="text-gray-400 text-sm">No students enrolled in this class.</p>
         ) : (
           <div className="overflow-x-auto">
@@ -101,7 +105,7 @@ export default function ClassDetailPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
-                {cls.students.map((s, idx) => (
+                {students.map((s, idx) => (
                   <tr
                     key={s.id}
                     className="hover:bg-gray-50 cursor-pointer"

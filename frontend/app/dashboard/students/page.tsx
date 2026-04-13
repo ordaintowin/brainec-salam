@@ -1,6 +1,6 @@
 'use client';
 import { useEffect, useState, useCallback } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { Plus, Eye, Pencil, Trash2 } from 'lucide-react';
 import api from '@/lib/api';
 import { useAuth } from '@/lib/auth';
@@ -22,12 +22,14 @@ interface Student {
 
 export default function StudentsPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { user } = useAuth();
   const [students, setStudents] = useState<Student[]>([]);
   const [search, setSearch] = useState('');
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const [loading, setLoading] = useState(true);
+  const [successMessage, setSuccessMessage] = useState(searchParams.get('created') === '1' ? 'Student created successfully!' : '');
   const [deleteTarget, setDeleteTarget] = useState<Student | null>(null);
   const [archiveReason, setArchiveReason] = useState('');
   const [deleteLoading, setDeleteLoading] = useState(false);
@@ -158,6 +160,13 @@ export default function StudentsPage() {
       <div className="mb-4 max-w-sm">
         <LiveSearch value={search} onChange={setSearch} placeholder="Search students…" />
       </div>
+
+      {successMessage && (
+        <div className="mb-4 p-3 bg-green-50 border border-green-200 text-green-700 rounded-lg text-sm flex items-center justify-between">
+          {successMessage}
+          <button onClick={() => setSuccessMessage('')} className="ml-2 text-green-500 hover:text-green-700">✕</button>
+        </div>
+      )}
 
       {loading ? (
         <div className="space-y-3">

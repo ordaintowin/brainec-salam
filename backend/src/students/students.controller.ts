@@ -43,6 +43,14 @@ export class StudentsController {
     return this.studentsService.findAll(page, limit, q);
   }
 
+  @Get('archived')
+  findAllArchived(
+    @Query('page', new DefaultValuePipe(1), ParseIntPipe) page: number,
+    @Query('limit', new DefaultValuePipe(20), ParseIntPipe) limit: number,
+  ) {
+    return this.studentsService.findAllArchived(page, limit);
+  }
+
   @Get(':id')
   findOne(@Param('id') id: string) {
     return this.studentsService.findOne(id);
@@ -74,5 +82,11 @@ export class StudentsController {
     @UploadedFile() file: Express.Multer.File,
   ) {
     return this.studentsService.uploadPhoto(id, file);
+  }
+
+  @Post(':id/restore')
+  @Roles(Role.HEADMISTRESS, Role.ADMIN)
+  restore(@Param('id') id: string) {
+    return this.studentsService.restore(id);
   }
 }

@@ -27,13 +27,13 @@ interface Student {
 
 interface Invoice {
   id: string;
-  invoiceNumber: string;
-  feeOrder?: { name: string };
-  totalAmount: number;
-  paidAmount: number;
+  feeOrder?: { title: string };
+  amountDue: number;
+  amountPaid: number;
   balance: number;
   status: string;
   dueDate: string;
+  studentId: string;
 }
 
 interface AttendanceRecord {
@@ -52,22 +52,18 @@ export default function StudentDetailPage() {
   const [attendance, setAttendance] = useState<AttendanceRecord[]>([]);
   const [activeTab, setActiveTab] = useState<'fees' | 'attendance'>('fees');
   const [loading, setLoading] = useState(true);
-  const [paymentModal, setPaymentModal] = useState<{ open: boolean; invoiceId: string; balance: number }>({
-    open: false, invoiceId: '', balance: 0,
+  const [paymentModal, setPaymentModal] = useState<{ open: boolean; invoiceId: string; studentId: string; balance: number }>({
+    open: false, invoiceId: '', studentId: '', balance: 0,
   });
 
   const canManage = user?.role === 'HEADMISTRESS' || user?.role === 'ADMIN';
 
   const fetchStudent = useCallback(async () => {
     try {
-      const [sRes, iRes, aRes] = await Promise.all([
-        api.get(`/students/${id}`),
-        api.get(`/finance/invoices?studentId=${id}`),
-        api.get(`/attendance/student/${id}`),
-      ]);
+      const sRes = await api.get(`/students/${id}`);
       setStudent(sRes.data);
-      setInvoices(iRes.data?.invoices || iRes.data || []);
-      setAttendance(aRes.data?.records || aRes.data || []);
+      setInvoices(Array.isArray(sRes.data?.feeInvoices) ? sRes.data.feeInvoices : []);
+      setAttendance(Array.isArray(sRes.data?.attendances) ? sRes.data.attendances : []);
     } catch {
       // silently handle
     } finally {
@@ -168,10 +164,10 @@ export default function StudentDetailPage() {
                 <tbody className="divide-y divide-gray-100">
                   {invoices.map(inv => (
                     <tr key={inv.id} className="hover:bg-gray-50">
-                      <td className="px-4 py-3 font-mono text-xs">{inv.invoiceNumber}</td>
-                      <td className="px-4 py-3">{inv.feeOrder?.name || '—'}</td>
-                      <td className="px-4 py-3">{formatCurrency(inv.totalAmount)}</td>
-                      <td className="px-4 py-3 text-green-700">{formatCurrency(inv.paidAmount)}</td>
+                      <td className="px-4 py-3 font-mono text-xs">INV-{inv.id.slice(-6).toUpperCase()}</td>
+                      <td className="px-4 py-3">{inv.feeOrder?.title || '—'}</td>
+                      <td className="px-4 py-3">{formatCurrency(inv.amountDue)}</td>
+                      <td className="px-4 py-3 text-green-700">{formatCurrency(inv.amountPaid)}</td>
                       <td className="px-4 py-3 text-red-600">{formatCurrency(inv.balance)}</td>
                       <td className="px-4 py-3"><PaymentStatusBadge status={inv.status} /></td>
                       <td className="px-4 py-3">{formatDate(inv.dueDate)}</td>
@@ -179,7 +175,7 @@ export default function StudentDetailPage() {
                         <td className="px-4 py-3">
                           {inv.balance > 0 && (
                             <button
-                              onClick={() => setPaymentModal({ open: true, invoiceId: inv.id, balance: inv.balance })}
+                              onClick={() => setPaymentModal({ open: true, invoiceId: inv.id, studentId: inv.studentId, balance: inv.balance })}
                               className="text-xs bg-[#16a34a] hover:bg-green-700 text-white px-3 py-1 rounded-md"
                             >
                               Record Payment
@@ -233,8 +229,9 @@ export default function StudentDetailPage() {
 
       <RecordPaymentModal
         isOpen={paymentModal.open}
-        onClose={() => setPaymentModal({ open: false, invoiceId: '', balance: 0 })}
+        onClose={() => setPaymentModal({ open: false, invoiceId: '', studentId: '', balance: 0 })}
         invoiceId={paymentModal.invoiceId}
+        studentId={paymentModal.studentId}
         balance={paymentModal.balance}
         onSuccess={fetchStudent}
       />

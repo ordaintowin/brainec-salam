@@ -20,6 +20,7 @@ interface RecordPaymentModalProps {
   isOpen: boolean;
   onClose: () => void;
   invoiceId: string;
+  studentId: string;
   balance: number;
   onSuccess?: () => void;
 }
@@ -28,6 +29,7 @@ export default function RecordPaymentModal({
   isOpen,
   onClose,
   invoiceId,
+  studentId,
   balance,
   onSuccess,
 }: RecordPaymentModalProps) {
@@ -46,6 +48,7 @@ export default function RecordPaymentModal({
     try {
       await api.post('/finance/payments', {
         invoiceId,
+        studentId,
         amount: parseFloat(data.amount),
         method: data.method,
         reference: data.reference,

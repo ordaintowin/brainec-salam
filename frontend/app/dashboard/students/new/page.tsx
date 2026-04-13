@@ -60,16 +60,20 @@ export default function NewStudentPage() {
       const res = await api.post('/students', payload);
       const studentId = res.data?.id;
 
-      // Step 2: Upload photo separately if provided
+      // Step 2: Upload photo separately if provided — failure does not block success
       if (photoFile && studentId) {
-        const formData = new FormData();
-        formData.append('photo', photoFile);
-        await api.post(`/students/${studentId}/photo`, formData, {
-          headers: { 'Content-Type': 'multipart/form-data' },
-        });
+        try {
+          const formData = new FormData();
+          formData.append('photo', photoFile);
+          await api.post(`/students/${studentId}/photo`, formData, {
+            headers: { 'Content-Type': 'multipart/form-data' },
+          });
+        } catch {
+          // photo upload failed (e.g. Cloudinary not configured) — student still created
+        }
       }
 
-      router.push('/dashboard/students');
+      router.push('/dashboard/students?created=1');
     } catch (err: unknown) {
       const msgRaw = (err as { response?: { data?: { message?: string | string[] } } })?.response?.data?.message;
       const message = Array.isArray(msgRaw) ? msgRaw.join(', ') : msgRaw || 'Failed to create student';
