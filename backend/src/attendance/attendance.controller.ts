@@ -21,7 +21,7 @@ export class AttendanceController {
 
   @Post()
   mark(@Body() dto: MarkAttendanceDto, @CurrentUser() user: any) {
-    return this.attendanceService.markAttendance(dto, user.id);
+    return this.attendanceService.markAttendance(dto, user.id, user.role);
   }
 
   @Post('bulk')
@@ -37,12 +37,34 @@ export class AttendanceController {
     return this.attendanceService.getClassAttendance(classId, date);
   }
 
+  @Get('dashboard')
+  getDashboard(@Query('classId') classId?: string) {
+    return this.attendanceService.getDashboard(classId);
+  }
+
+  @Get('dashboard/details')
+  getDashboardDetails(
+    @Query('scope') scope: 'day' | 'week' | 'term',
+    @Query('status') status: 'PRESENT' | 'ABSENT' | 'LATE',
+    @Query('classId') classId?: string,
+  ) {
+    return this.attendanceService.getDashboardDetails(scope, status, classId);
+  }
+
+  @Get('report/class/:classId')
+  getClassReport(
+    @Param('classId') classId: string,
+    @Query('termId') termId?: string,
+  ) {
+    return this.attendanceService.getClassReport(classId, termId);
+  }
+
   @Patch(':id')
   update(
     @Param('id') id: string,
     @Body() dto: UpdateAttendanceDto,
     @CurrentUser() user: any,
   ) {
-    return this.attendanceService.update(id, dto, user.id);
+    return this.attendanceService.update(id, dto, user.id, user.role);
   }
 }

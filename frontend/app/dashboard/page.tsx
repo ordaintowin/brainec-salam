@@ -1,19 +1,15 @@
 'use client';
 import { useEffect, useState, useCallback } from 'react';
-import { Users, GraduationCap, BookOpen, DollarSign, TrendingDown, ClipboardCheck } from 'lucide-react';
+import { Users, GraduationCap, BookOpen, ClipboardCheck } from 'lucide-react';
 import { useAuth } from '@/lib/auth';
 import api from '@/lib/api';
 import StatCard from '@/components/StatCard';
-import { formatCurrency, formatDateTime } from '@/lib/utils';
+import { formatDateTime } from '@/lib/utils';
 
 interface DashboardStats {
   totalStudents: number;
   totalTeachers: number;
   totalClasses: number;
-  totalCollected: number;
-  totalOutstanding: number;
-  todayAttendancePercent: number;
-  paymentBreakdown?: { status: string; count: number }[];
 }
 
 interface ActivityLog {
@@ -69,7 +65,7 @@ export default function DashboardPage() {
         <div className="animate-pulse space-y-4">
           <div className="h-8 bg-gray-200 rounded w-48" />
           <div className="grid grid-cols-3 gap-4">
-            {[...Array(6)].map((_, i) => <div key={i} className="h-28 bg-gray-200 rounded-xl" />)}
+            {[...Array(3)].map((_, i) => <div key={i} className="h-28 bg-gray-200 rounded-xl" />)}
           </div>
         </div>
       </div>
@@ -117,42 +113,11 @@ export default function DashboardPage() {
 
       {stats && (
         <>
-          <div className="grid grid-cols-2 md:grid-cols-3 gap-4 mb-8">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
             <StatCard title="Total Students" value={stats.totalStudents} icon={Users} color="#2563eb" />
             <StatCard title="Total Teachers" value={stats.totalTeachers} icon={GraduationCap} color="#9333ea" />
             <StatCard title="Total Classes" value={stats.totalClasses} icon={BookOpen} color="#0891b2" />
-            <StatCard title="Total Collected" value={formatCurrency(stats.totalCollected)} icon={DollarSign} color="#16a34a" />
-            <StatCard title="Total Outstanding" value={formatCurrency(stats.totalOutstanding)} icon={TrendingDown} color="#dc2626" />
-            <StatCard
-              title="Today's Attendance"
-              value={`${Math.round(stats.todayAttendancePercent || 0)}%`}
-              icon={ClipboardCheck}
-              color="#d97706"
-            />
           </div>
-
-          {/* Payment Status Breakdown */}
-          {stats.paymentBreakdown && stats.paymentBreakdown.length > 0 && (
-            <div className="bg-white rounded-xl border border-gray-200 p-6 mb-8">
-              <h2 className="text-base font-semibold text-gray-800 mb-4">Payment Status Breakdown</h2>
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-                {stats.paymentBreakdown.map(({ status, count }) => {
-                  const colors: Record<string, string> = {
-                    PAID: 'text-green-700 bg-green-50',
-                    PARTIAL: 'text-yellow-700 bg-yellow-50',
-                    PENDING: 'text-gray-600 bg-gray-50',
-                    OVERDUE: 'text-red-700 bg-red-50',
-                  };
-                  return (
-                    <div key={status} className={`rounded-lg p-4 text-center ${colors[status] || 'bg-gray-50'}`}>
-                      <p className="text-2xl font-bold">{count}</p>
-                      <p className="text-xs font-medium mt-1 capitalize">{status.toLowerCase()}</p>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          )}
         </>
       )}
 
