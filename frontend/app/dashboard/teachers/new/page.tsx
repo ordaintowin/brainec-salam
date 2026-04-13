@@ -10,7 +10,7 @@ import api from '@/lib/api';
 const schema = z.object({
   name: z.string().min(1, 'Name is required'),
   email: z.string().email('Invalid email'),
-  password: z.string().min(6, 'Password must be at least 6 characters'),
+  password: z.string().min(8, 'Password must be at least 8 characters'),
   phone: z.string().optional(),
   address: z.string().optional(),
   qualification: z.string().optional(),
@@ -49,15 +49,27 @@ export default function NewTeacherPage() {
   const onSubmit = async (data: FormData) => {
     setError('');
     try {
-      const formData = new FormData();
+      // Step 1: Create teacher with JSON
+      const payload: Record<string, unknown> = {};
       Object.entries(data).forEach(([key, value]) => {
-        if (value !== undefined && value !== '') formData.append(key, value as string);
+        if (value !== undefined && value !== '') payload[key] = value;
       });
-      if (photoFile) formData.append('photo', photoFile);
-      await api.post('/teachers', formData, { headers: { 'Content-Type': 'multipart/form-data' } });
+      const res = await api.post('/teachers', payload);
+      const teacherId = res.data?.id;
+
+      // Step 2: Upload photo separately if provided
+      if (photoFile && teacherId) {
+        const formData = new FormData();
+        formData.append('photo', photoFile);
+        await api.post(`/teachers/${teacherId}/photo`, formData, {
+          headers: { 'Content-Type': 'multipart/form-data' },
+        });
+      }
+
       router.push('/dashboard/teachers');
     } catch (err: unknown) {
-      const message = (err as { response?: { data?: { message?: string } } })?.response?.data?.message || 'Failed to create teacher';
+      const msgRaw = (err as { response?: { data?: { message?: string | string[] } } })?.response?.data?.message;
+      const message = Array.isArray(msgRaw) ? msgRaw.join(', ') : msgRaw || 'Failed to create teacher';
       setError(message);
     }
   };

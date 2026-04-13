@@ -15,7 +15,7 @@ type ActiveTab = 'feeOrders' | 'invoices' | 'payments' | 'summary';
 
 interface FeeOrder {
   id: string;
-  name: string;
+  title: string;
   amount: number;
   dueDate: string;
   class?: { name: string };
@@ -24,11 +24,11 @@ interface FeeOrder {
 
 interface Invoice {
   id: string;
-  invoiceNumber: string;
+  invoiceNumber?: string;
   student?: { firstName: string; lastName: string; studentId: string };
-  feeOrder?: { name: string };
-  totalAmount: number;
-  paidAmount: number;
+  feeOrder?: { title: string };
+  amountDue: number;
+  amountPaid: number;
   balance: number;
   status: string;
   dueDate: string;
@@ -93,24 +93,26 @@ export default function FinancePage() {
   const fetchAll = useCallback(async () => {
     setLoading(true);
     try {
-      const [foRes, cRes] = await Promise.all([
-        api.get('/finance/fee-orders'),
-        api.get('/classes'),
-      ]);
-      setFeeOrders(foRes.data?.feeOrders || foRes.data || []);
-      setClasses(cRes.data?.classes || cRes.data || []);
+      const foRes = await api.get('/finance/fee-orders');
+      setFeeOrders(foRes.data?.data || foRes.data || []);
     } catch {
       // silent
     } finally {
       setLoading(false);
+    }
+    try {
+      const cRes = await api.get('/classes');
+      setClasses(cRes.data?.classes || cRes.data || []);
+    } catch {
+      // silent
     }
   }, []);
 
   const fetchInvoices = useCallback(async () => {
     try {
       const res = await api.get('/finance/invoices', { params: { search, page: invoicePage, limit: 20 } });
-      setInvoices(res.data?.invoices || res.data || []);
-      setInvoiceTotalPages(res.data?.totalPages || 1);
+      setInvoices(res.data?.data || res.data || []);
+      setInvoiceTotalPages(res.data?.meta?.totalPages || 1);
     } catch {
       setInvoices([]);
     }
@@ -119,7 +121,7 @@ export default function FinancePage() {
   const fetchPayments = useCallback(async () => {
     try {
       const res = await api.get('/finance/payments', { params: { limit: 50 } });
-      setPayments(res.data?.payments || res.data || []);
+      setPayments(res.data?.data || res.data || []);
     } catch {
       setPayments([]);
     }
@@ -158,11 +160,10 @@ export default function FinancePage() {
     setFeeOrderError('');
     try {
       await api.post('/finance/fee-orders', {
-        name: data.name,
+        title: data.name,
         amount: parseFloat(data.amount),
         dueDate: data.dueDate,
         classId: data.classId || undefined,
-        applyToAll: data.applyToAll || false,
       });
       setShowFeeOrderModal(false);
       resetFeeForm();
@@ -239,7 +240,7 @@ export default function FinancePage() {
                 ) : (
                   feeOrders.map(fo => (
                     <tr key={fo.id} className="hover:bg-gray-50">
-                      <td className="px-4 py-3 font-medium text-gray-800">{fo.name}</td>
+                      <td className="px-4 py-3 font-medium text-gray-800">{fo.title}</td>
                       <td className="px-4 py-3 text-[#16a34a] font-medium">{formatCurrency(fo.amount)}</td>
                       <td className="px-4 py-3 text-gray-600">{fo.class?.name || 'All Classes'}</td>
                       <td className="px-4 py-3 text-gray-600">{formatDate(fo.dueDate)}</td>
@@ -285,9 +286,9 @@ export default function FinancePage() {
                         {inv.student ? `${inv.student.firstName} ${inv.student.lastName}` : '—'}
                         {inv.student?.studentId && <span className="block text-xs text-gray-400">{inv.student.studentId}</span>}
                       </td>
-                      <td className="px-4 py-3 text-gray-600">{inv.feeOrder?.name || '—'}</td>
-                      <td className="px-4 py-3">{formatCurrency(inv.totalAmount)}</td>
-                      <td className="px-4 py-3 text-green-700">{formatCurrency(inv.paidAmount)}</td>
+                      <td className="px-4 py-3 text-gray-600">{inv.feeOrder?.title || '—'}</td>
+                      <td className="px-4 py-3">{formatCurrency(inv.amountDue)}</td>
+                      <td className="px-4 py-3 text-green-700">{formatCurrency(inv.amountPaid)}</td>
                       <td className="px-4 py-3 text-red-600">{formatCurrency(inv.balance)}</td>
                       <td className="px-4 py-3"><PaymentStatusBadge status={inv.status} /></td>
                       <td className="px-4 py-3 text-gray-600">{formatDate(inv.dueDate)}</td>
