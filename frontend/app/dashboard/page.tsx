@@ -4,7 +4,7 @@ import { Users, GraduationCap, BookOpen, ClipboardCheck } from 'lucide-react';
 import { useAuth } from '@/lib/auth';
 import api from '@/lib/api';
 import StatCard from '@/components/StatCard';
-import { formatDateTime } from '@/lib/utils';
+import { formatDateTime, formatCurrency } from '@/lib/utils';
 
 interface DashboardStats {
   totalStudents: number;
@@ -12,12 +12,14 @@ interface DashboardStats {
   totalClasses: number;
 }
 
-interface ActivityLog {
+interface RecentPayment {
   id: string;
-  createdAt: string;
-  user?: { name: string };
-  action: string;
-  description: string;
+  paidAt: string;
+  amount: number;
+  method: string;
+  paidBy: string;
+  student?: { firstName: string; lastName: string };
+  invoice?: { id: string; feeOrder?: { title: string } };
 }
 
 interface TeacherDashboard {
@@ -31,7 +33,7 @@ interface TeacherDashboard {
 export default function DashboardPage() {
   const { user } = useAuth();
   const [stats, setStats] = useState<DashboardStats | null>(null);
-  const [logs, setLogs] = useState<ActivityLog[]>([]);
+  const [recentPayments, setRecentPayments] = useState<RecentPayment[]>([]);
   const [teacherData, setTeacherData] = useState<TeacherDashboard | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -41,12 +43,13 @@ export default function DashboardPage() {
         const res = await api.get('/dashboard/teacher');
         setTeacherData(res.data);
       } else {
-        const [statsRes, logsRes] = await Promise.all([
+        const [statsRes, paymentsRes] = await Promise.all([
           api.get('/dashboard/stats'),
-          api.get('/logs?limit=10'),
+          api.get('/finance/payments', { params: { limit: 10 } }),
         ]);
         setStats(statsRes.data);
-        setLogs(Array.isArray(logsRes.data?.data) ? logsRes.data.data : Array.isArray(logsRes.data) ? logsRes.data : []);
+        const payments = paymentsRes.data?.data || paymentsRes.data || [];
+        setRecentPayments(Array.isArray(payments) ? payments : []);
       }
     } catch {
       // silently fail
@@ -121,31 +124,35 @@ export default function DashboardPage() {
         </>
       )}
 
-      {/* Recent Activity */}
+      {/* Recent Payments */}
       <div className="bg-white rounded-xl border border-gray-200 p-6">
-        <h2 className="text-base font-semibold text-gray-800 mb-4">Recent Activity</h2>
-        {logs.length === 0 ? (
-          <p className="text-gray-400 text-sm">No activity yet.</p>
+        <h2 className="text-base font-semibold text-gray-800 mb-4">Recent Payments</h2>
+        {recentPayments.length === 0 ? (
+          <p className="text-gray-400 text-sm">No payments yet.</p>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-gray-100">
-                  <th className="text-left py-2 px-3 text-xs text-gray-400 font-medium">Time</th>
-                  <th className="text-left py-2 px-3 text-xs text-gray-400 font-medium">User</th>
-                  <th className="text-left py-2 px-3 text-xs text-gray-400 font-medium">Action</th>
-                  <th className="text-left py-2 px-3 text-xs text-gray-400 font-medium">Description</th>
+                  <th className="text-left py-2 px-3 text-xs text-gray-400 font-medium">Date</th>
+                  <th className="text-left py-2 px-3 text-xs text-gray-400 font-medium">Student</th>
+                  <th className="text-left py-2 px-3 text-xs text-gray-400 font-medium">Fee Order</th>
+                  <th className="text-left py-2 px-3 text-xs text-gray-400 font-medium">Amount</th>
+                  <th className="text-left py-2 px-3 text-xs text-gray-400 font-medium">Method</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-50">
-                {logs.map(log => (
-                  <tr key={log.id} className="hover:bg-gray-50">
-                    <td className="py-2.5 px-3 text-gray-400 whitespace-nowrap text-xs">{formatDateTime(log.createdAt)}</td>
-                    <td className="py-2.5 px-3 font-medium text-gray-700">{log.user?.name || '—'}</td>
-                    <td className="py-2.5 px-3">
-                      <span className="px-2 py-0.5 bg-blue-50 text-blue-700 rounded text-xs font-medium">{log.action}</span>
+                {recentPayments.map(p => (
+                  <tr key={p.id} className="hover:bg-gray-50">
+                    <td className="py-2.5 px-3 text-gray-400 whitespace-nowrap text-xs">{formatDateTime(p.paidAt)}</td>
+                    <td className="py-2.5 px-3 font-medium text-gray-700">
+                      {p.student ? `${p.student.firstName} ${p.student.lastName}` : '—'}
                     </td>
-                    <td className="py-2.5 px-3 text-gray-600 max-w-xs truncate">{log.description}</td>
+                    <td className="py-2.5 px-3 text-gray-600">{p.invoice?.feeOrder?.title || '—'}</td>
+                    <td className="py-2.5 px-3 font-medium text-green-700">{formatCurrency(p.amount)}</td>
+                    <td className="py-2.5 px-3">
+                      <span className="px-2 py-0.5 bg-blue-50 text-blue-700 rounded text-xs font-medium capitalize">{p.method.replace('_', ' ').toLowerCase()}</span>
+                    </td>
                   </tr>
                 ))}
               </tbody>
