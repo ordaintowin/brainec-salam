@@ -28,8 +28,9 @@ export class FinanceController {
   getFeeOrders(
     @Query('page', new DefaultValuePipe(1), ParseIntPipe) page: number,
     @Query('limit', new DefaultValuePipe(10), ParseIntPipe) limit: number,
+    @Query('q') q?: string,
   ) {
-    return this.financeService.getFeeOrders(page, limit);
+    return this.financeService.getFeeOrders(page, limit, q);
   }
 
   @Get('invoices')

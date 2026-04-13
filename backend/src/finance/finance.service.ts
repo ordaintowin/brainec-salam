@@ -46,10 +46,20 @@ export class FinanceService {
     return { ...feeOrder, invoicesCreated: students.length };
   }
 
-  async getFeeOrders(page = 1, limit = 10) {
+  async getFeeOrders(page = 1, limit = 10, q?: string) {
     const skip = (page - 1) * limit;
+    const where: any = {};
+
+    if (q) {
+      where.OR = [
+        { title: { contains: q, mode: 'insensitive' } },
+        { description: { contains: q, mode: 'insensitive' } },
+      ];
+    }
+
     const [data, total] = await Promise.all([
       this.prisma.feeOrder.findMany({
+        where,
         skip,
         take: limit,
         orderBy: { createdAt: 'desc' },
@@ -58,7 +68,7 @@ export class FinanceService {
           _count: { select: { invoices: true } },
         },
       }),
-      this.prisma.feeOrder.count(),
+      this.prisma.feeOrder.count({ where }),
     ]);
 
     return {

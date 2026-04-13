@@ -87,6 +87,9 @@ export default function FinancePage() {
   const [summary, setSummary] = useState<FinanceSummary | null>(null);
   const [classes, setClasses] = useState<ClassOption[]>([]);
   const [search, setSearch] = useState('');
+  const [feeOrderSearch, setFeeOrderSearch] = useState('');
+  const [feeOrderPage, setFeeOrderPage] = useState(1);
+  const [feeOrderTotalPages, setFeeOrderTotalPages] = useState(1);
   const [invoicePage, setInvoicePage] = useState(1);
   const [invoiceTotalPages, setInvoiceTotalPages] = useState(1);
   const [loading, setLoading] = useState(true);
@@ -106,16 +109,20 @@ export default function FinancePage() {
 
   const canManage = user?.role === 'HEADMISTRESS' || user?.role === 'ADMIN';
 
-  const fetchAll = useCallback(async () => {
+  const fetchFeeOrders = useCallback(async () => {
     setLoading(true);
     try {
-      const foRes = await api.get('/finance/fee-orders');
+      const foRes = await api.get('/finance/fee-orders', { params: { q: feeOrderSearch, page: feeOrderPage, limit: 20 } });
       setFeeOrders(foRes.data?.data || foRes.data || []);
+      setFeeOrderTotalPages(foRes.data?.meta?.totalPages || 1);
     } catch {
       // silent
     } finally {
       setLoading(false);
     }
+  }, [feeOrderSearch, feeOrderPage]);
+
+  const fetchClasses = useCallback(async () => {
     try {
       const cRes = await api.get('/classes');
       setClasses(cRes.data?.classes || cRes.data || []);
@@ -153,8 +160,12 @@ export default function FinancePage() {
   }, []);
 
   useEffect(() => {
-    fetchAll();
-  }, [fetchAll]);
+    fetchFeeOrders();
+  }, [fetchFeeOrders]);
+
+  useEffect(() => {
+    fetchClasses();
+  }, [fetchClasses]);
 
   useEffect(() => {
     if (activeTab === 'invoices') fetchInvoices();
@@ -172,6 +183,10 @@ export default function FinancePage() {
     setInvoicePage(1);
   }, [search]);
 
+  useEffect(() => {
+    setFeeOrderPage(1);
+  }, [feeOrderSearch]);
+
   const onCreateFeeOrder = async (data: FeeOrderForm) => {
     setFeeOrderError('');
     try {
@@ -183,7 +198,7 @@ export default function FinancePage() {
       });
       setShowFeeOrderModal(false);
       resetFeeForm();
-      fetchAll();
+      fetchFeeOrders();
     } catch (err: unknown) {
       const message = (err as { response?: { data?: { message?: string } } })?.response?.data?.message || 'Failed to create fee order';
       setFeeOrderError(message);
@@ -277,44 +292,60 @@ export default function FinancePage() {
 
       {/* Fee Orders Tab */}
       {activeTab === 'feeOrders' && (
-        loading ? (
-          <div className="space-y-3">{[...Array(4)].map((_, i) => <div key={i} className="h-12 bg-gray-100 rounded animate-pulse" />)}</div>
-        ) : (
-          <div className="overflow-x-auto rounded-lg border border-gray-200">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="bg-gray-50 border-b">
-                  <th className="text-left px-4 py-3 text-xs text-gray-400 font-medium uppercase">Name</th>
-                  <th className="text-left px-4 py-3 text-xs text-gray-400 font-medium uppercase">Amount</th>
-                  <th className="text-left px-4 py-3 text-xs text-gray-400 font-medium uppercase">Type</th>
-                  <th className="text-left px-4 py-3 text-xs text-gray-400 font-medium uppercase">Class</th>
-                  <th className="text-left px-4 py-3 text-xs text-gray-400 font-medium uppercase">Due Date</th>
-                  <th className="text-left px-4 py-3 text-xs text-gray-400 font-medium uppercase">Invoices</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-100">
-                {feeOrders.length === 0 ? (
-                  <tr><td colSpan={6} className="px-4 py-8 text-center text-gray-400">No fee orders yet.</td></tr>
-                ) : (
-                  feeOrders.map(fo => (
-                    <tr key={fo.id} className="hover:bg-gray-50">
-                      <td className="px-4 py-3 font-medium text-gray-800">{fo.title}</td>
-                      <td className="px-4 py-3 text-[#16a34a] font-medium">{formatCurrency(fo.amount)}</td>
-                      <td className="px-4 py-3">
-                        <span className={`px-2 py-0.5 rounded text-xs font-medium ${fo.class ? 'bg-blue-50 text-blue-700' : 'bg-purple-50 text-purple-700'}`}>
-                          {fo.class ? 'Class' : 'Individual'}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3 text-gray-600">{fo.class?.name || 'All Students'}</td>
-                      <td className="px-4 py-3 text-gray-600">{formatDate(fo.dueDate)}</td>
-                      <td className="px-4 py-3 text-gray-600">{fo._count?.invoices ?? 0}</td>
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
+        <div>
+          <div className="mb-4 max-w-sm">
+            <LiveSearch value={feeOrderSearch} onChange={setFeeOrderSearch} placeholder="Search fee orders…" />
           </div>
-        )
+          {loading ? (
+            <div className="space-y-3">{[...Array(4)].map((_, i) => <div key={i} className="h-12 bg-gray-100 rounded animate-pulse" />)}</div>
+          ) : (
+            <div className="overflow-x-auto rounded-lg border border-gray-200">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="bg-gray-50 border-b">
+                    <th className="text-left px-4 py-3 text-xs text-gray-400 font-medium uppercase">Name</th>
+                    <th className="text-left px-4 py-3 text-xs text-gray-400 font-medium uppercase">Amount</th>
+                    <th className="text-left px-4 py-3 text-xs text-gray-400 font-medium uppercase">Type</th>
+                    <th className="text-left px-4 py-3 text-xs text-gray-400 font-medium uppercase">Class</th>
+                    <th className="text-left px-4 py-3 text-xs text-gray-400 font-medium uppercase">Due Date</th>
+                    <th className="text-left px-4 py-3 text-xs text-gray-400 font-medium uppercase">Invoices</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100">
+                  {feeOrders.length === 0 ? (
+                    <tr><td colSpan={6} className="px-4 py-8 text-center text-gray-400">No fee orders found.</td></tr>
+                  ) : (
+                    feeOrders.map(fo => (
+                      <tr key={fo.id} className="hover:bg-gray-50">
+                        <td className="px-4 py-3 font-medium text-gray-800">{fo.title}</td>
+                        <td className="px-4 py-3 text-[#16a34a] font-medium">{formatCurrency(fo.amount)}</td>
+                        <td className="px-4 py-3">
+                          <span className={`px-2 py-0.5 rounded text-xs font-medium ${fo.class ? 'bg-blue-50 text-blue-700' : 'bg-purple-50 text-purple-700'}`}>
+                            {fo.class ? 'Class' : 'Individual'}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3 text-gray-600">{fo.class?.name || 'All Students'}</td>
+                        <td className="px-4 py-3 text-gray-600">{formatDate(fo.dueDate)}</td>
+                        <td className="px-4 py-3 text-gray-600">{fo._count?.invoices ?? 0}</td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {/* Fee Orders Pagination */}
+          {feeOrderTotalPages > 1 && (
+            <div className="flex items-center justify-between mt-4">
+              <p className="text-sm text-gray-500">Page {feeOrderPage} of {feeOrderTotalPages}</p>
+              <div className="flex gap-1">
+                <button onClick={() => setFeeOrderPage(p => p - 1)} disabled={feeOrderPage <= 1} className="px-3 py-1.5 text-sm border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-40">Previous</button>
+                <button onClick={() => setFeeOrderPage(p => p + 1)} disabled={feeOrderPage >= feeOrderTotalPages} className="px-3 py-1.5 text-sm border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-40">Next</button>
+              </div>
+            </div>
+          )}
+        </div>
       )}
 
       {/* Invoices Tab */}
