@@ -20,14 +20,27 @@ export class FinanceService {
       include: { class: true },
     });
 
-    // Find all active students in class (or all classes)
-    const studentWhere: any = { isArchived: false };
-    if (dto.classId) studentWhere.classId = dto.classId;
+    let students: { id: string }[];
 
-    const students = await this.prisma.student.findMany({
-      where: studentWhere,
-      select: { id: true },
-    });
+    if (dto.studentIds && dto.studentIds.length > 0) {
+      // Create invoices only for the specified students
+      students = await this.prisma.student.findMany({
+        where: {
+          id: { in: dto.studentIds },
+          isArchived: false,
+        },
+        select: { id: true },
+      });
+    } else {
+      // Find all active students in class (or all classes)
+      const studentWhere: any = { isArchived: false };
+      if (dto.classId) studentWhere.classId = dto.classId;
+
+      students = await this.prisma.student.findMany({
+        where: studentWhere,
+        select: { id: true },
+      });
+    }
 
     if (students.length > 0) {
       await this.prisma.feeInvoice.createMany({
