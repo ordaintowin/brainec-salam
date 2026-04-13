@@ -52,7 +52,12 @@ export class AttendanceService {
     this.ensureSameDay(date, userRole);
 
     const term = await this.getTermForDate(date);
-    if (term && term.status === 'CLOSED') {
+    if (!term) {
+      throw new ForbiddenException(
+        'Attendance cannot be marked — no active term covers this date. Please open a term first.',
+      );
+    }
+    if (term.status === 'CLOSED') {
       throw new ForbiddenException(
         `Attendance cannot be modified — term "${term.name}" is closed`,
       );
@@ -72,7 +77,7 @@ export class AttendanceService {
         status: dto.status,
         markedBy: markedById,
         notes: dto.notes,
-        termId: term?.id || null,
+        termId: term.id,
       },
       update: {
         status: dto.status,
@@ -105,7 +110,12 @@ export class AttendanceService {
     this.ensureSameDay(date, user.role);
 
     const term = await this.getTermForDate(date);
-    if (term && term.status === 'CLOSED') {
+    if (!term) {
+      throw new ForbiddenException(
+        'Attendance cannot be marked — no active term covers this date. Please open a term first.',
+      );
+    }
+    if (term.status === 'CLOSED') {
       throw new ForbiddenException(
         `Attendance cannot be modified — term "${term.name}" is closed`,
       );
@@ -124,7 +134,7 @@ export class AttendanceService {
             status: r.status,
             markedBy: markedById,
             notes: r.notes,
-            termId: term?.id || null,
+            termId: term.id,
           },
           update: {
             status: r.status,
@@ -172,6 +182,7 @@ export class AttendanceService {
       termName: term?.name || null,
       isTermClosed,
       isDayOver,
+      hasActiveTerm: !!term,
     };
   }
 

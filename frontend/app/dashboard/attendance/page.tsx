@@ -51,13 +51,14 @@ export default function AttendancePage() {
   const [termName, setTermName] = useState<string | null>(null);
   const [isTermClosed, setIsTermClosed] = useState(false);
   const [isDayOver, setIsDayOver] = useState(false);
+  const [hasActiveTerm, setHasActiveTerm] = useState(true);
   const [dashboard, setDashboard] = useState<DashboardData | null>(null);
   const [dashboardClassId, setDashboardClassId] = useState('');
   const [dashboardLoading, setDashboardLoading] = useState(true);
 
   const isTeacher = user?.role === 'TEACHER';
   const isHeadmistress = user?.role === 'HEADMISTRESS';
-  const isReadOnly = isTermClosed || (isDayOver && !isHeadmistress);
+  const isReadOnly = isTermClosed || (isDayOver && !isHeadmistress) || !hasActiveTerm;
 
   const fetchClasses = useCallback(async () => {
     try {
@@ -117,11 +118,13 @@ export default function AttendancePage() {
         setTermName(null);
         setIsTermClosed(false);
         setIsDayOver(false);
+        setHasActiveTerm(false);
       } else {
         attRecords = attRes.data?.records || [];
         setTermName(attRes.data?.termName || null);
         setIsTermClosed(attRes.data?.isTermClosed || false);
         setIsDayOver(attRes.data?.isDayOver || false);
+        setHasActiveTerm(attRes.data?.hasActiveTerm ?? true);
       }
 
       setStudents(
@@ -463,6 +466,13 @@ export default function AttendancePage() {
 
           {error && (
             <div className="mb-4 p-3 bg-red-50 border border-red-200 text-red-700 rounded-lg text-sm">{error}</div>
+          )}
+
+          {/* No Active Term Banner */}
+          {!hasActiveTerm && !loading && selectedClassId && (
+            <div className="mb-4 p-3 bg-orange-50 border border-orange-200 text-orange-700 rounded-lg text-sm">
+              <strong>No active term</strong> — attendance cannot be marked until a term is opened. Please go to <a href="/dashboard/terms" className="underline font-medium">Terms</a> to create or activate a term.
+            </div>
           )}
 
           {/* Term Info Banner */}
