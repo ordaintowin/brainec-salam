@@ -56,8 +56,8 @@ export default function AttendancePage() {
   const [dashboardLoading, setDashboardLoading] = useState(true);
 
   const isTeacher = user?.role === 'TEACHER';
-  const isHead = user?.role === 'HEADMISTRESS';
-  const isReadOnly = isTermClosed || (isDayOver && !isHead);
+  const isHeadmistress = user?.role === 'HEADMISTRESS';
+  const isReadOnly = isTermClosed || (isDayOver && !isHeadmistress);
 
   const fetchClasses = useCallback(async () => {
     try {
@@ -478,7 +478,7 @@ export default function AttendancePage() {
           )}
 
           {/* Day Over Banner */}
-          {isDayOver && !isTermClosed && !isHead && (
+          {isDayOver && !isTermClosed && !isHeadmistress && (
             <div className="mb-4 p-3 bg-yellow-50 border border-yellow-200 text-yellow-700 rounded-lg text-sm">
               <strong>Day is over</strong> — attendance for past days cannot be edited.
             </div>

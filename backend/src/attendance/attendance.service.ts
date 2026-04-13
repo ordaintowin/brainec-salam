@@ -40,7 +40,7 @@ export class AttendanceService {
     target.setUTCHours(0, 0, 0, 0);
     if (target.getTime() < today.getTime() && userRole !== 'HEADMISTRESS') {
       throw new ForbiddenException(
-        'Attendance for past days cannot be modified — only the day\'s attendance can be edited',
+        'Past attendance records cannot be modified',
       );
     }
   }
