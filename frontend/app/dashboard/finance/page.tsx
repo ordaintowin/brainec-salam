@@ -286,6 +286,7 @@ export default function FinancePage() {
                 <tr className="bg-gray-50 border-b">
                   <th className="text-left px-4 py-3 text-xs text-gray-400 font-medium uppercase">Name</th>
                   <th className="text-left px-4 py-3 text-xs text-gray-400 font-medium uppercase">Amount</th>
+                  <th className="text-left px-4 py-3 text-xs text-gray-400 font-medium uppercase">Type</th>
                   <th className="text-left px-4 py-3 text-xs text-gray-400 font-medium uppercase">Class</th>
                   <th className="text-left px-4 py-3 text-xs text-gray-400 font-medium uppercase">Due Date</th>
                   <th className="text-left px-4 py-3 text-xs text-gray-400 font-medium uppercase">Invoices</th>
@@ -293,13 +294,18 @@ export default function FinancePage() {
               </thead>
               <tbody className="divide-y divide-gray-100">
                 {feeOrders.length === 0 ? (
-                  <tr><td colSpan={5} className="px-4 py-8 text-center text-gray-400">No fee orders yet.</td></tr>
+                  <tr><td colSpan={6} className="px-4 py-8 text-center text-gray-400">No fee orders yet.</td></tr>
                 ) : (
                   feeOrders.map(fo => (
                     <tr key={fo.id} className="hover:bg-gray-50">
                       <td className="px-4 py-3 font-medium text-gray-800">{fo.title}</td>
                       <td className="px-4 py-3 text-[#16a34a] font-medium">{formatCurrency(fo.amount)}</td>
-                      <td className="px-4 py-3 text-gray-600">{fo.class?.name || 'All Classes'}</td>
+                      <td className="px-4 py-3">
+                        <span className={`px-2 py-0.5 rounded text-xs font-medium ${fo.class ? 'bg-blue-50 text-blue-700' : 'bg-purple-50 text-purple-700'}`}>
+                          {fo.class ? 'Class' : 'Individual'}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 text-gray-600">{fo.class?.name || 'All Students'}</td>
                       <td className="px-4 py-3 text-gray-600">{formatDate(fo.dueDate)}</td>
                       <td className="px-4 py-3 text-gray-600">{fo._count?.invoices ?? 0}</td>
                     </tr>
