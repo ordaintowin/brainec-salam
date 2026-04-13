@@ -1,12 +1,13 @@
 'use client';
 import { useEffect, useState, useCallback } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { Plus, Eye, Pencil } from 'lucide-react';
+import { Plus, Eye, Pencil, Trash2 } from 'lucide-react';
 import api from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import DataTable from '@/components/DataTable';
 import LiveSearch from '@/components/LiveSearch';
 import InitialsAvatar from '@/components/InitialsAvatar';
+import ConfirmModal from '@/components/ConfirmModal';
 import { formatDate } from '@/lib/utils';
 
 interface Teacher {
@@ -29,6 +30,8 @@ export default function TeachersPage() {
   const [totalPages, setTotalPages] = useState(1);
   const [loading, setLoading] = useState(true);
   const [successMessage, setSuccessMessage] = useState(searchParams.get('created') === '1' ? 'Teacher created successfully!' : '');
+  const [archiveModal, setArchiveModal] = useState<{ open: boolean; teacher: Teacher | null }>({ open: false, teacher: null });
+  const [archiveLoading, setArchiveLoading] = useState(false);
 
   const fetchTeachers = useCallback(async () => {
     setLoading(true);
@@ -58,6 +61,21 @@ export default function TeachersPage() {
   }, [search]);
 
   const canManage = user?.role === 'HEADMISTRESS' || user?.role === 'ADMIN';
+
+  const handleArchive = async (reason: string) => {
+    if (!archiveModal.teacher) return;
+    setArchiveLoading(true);
+    try {
+      await api.delete(`/teachers/${archiveModal.teacher.id}`, { data: { archiveReason: reason } });
+      setArchiveModal({ open: false, teacher: null });
+      setSuccessMessage('Teacher archived successfully.');
+      fetchTeachers();
+    } catch {
+      // silent
+    } finally {
+      setArchiveLoading(false);
+    }
+  };
 
   const columns = [
     {
@@ -96,12 +114,21 @@ export default function TeachersPage() {
             <Eye className="w-4 h-4" />
           </button>
           {canManage && (
-            <button
-              onClick={() => router.push(`/dashboard/teachers/${row.id}/edit`)}
-              className="p-1.5 text-gray-600 hover:bg-gray-50 rounded"
-            >
-              <Pencil className="w-4 h-4" />
-            </button>
+            <>
+              <button
+                onClick={() => router.push(`/dashboard/teachers/${row.id}/edit`)}
+                className="p-1.5 text-gray-600 hover:bg-gray-50 rounded"
+              >
+                <Pencil className="w-4 h-4" />
+              </button>
+              <button
+                onClick={() => setArchiveModal({ open: true, teacher: row })}
+                className="p-1.5 text-red-500 hover:bg-red-50 rounded"
+                title="Archive teacher"
+              >
+                <Trash2 className="w-4 h-4" />
+              </button>
+            </>
           )}
         </div>
       ),

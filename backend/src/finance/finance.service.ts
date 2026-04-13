@@ -141,22 +141,15 @@ export class FinanceService {
     if (amountNum <= 0) {
       throw new BadRequestException('Payment amount must be positive');
     }
-    if (currentPaid + amountNum > amountDue) {
-      throw new BadRequestException('Payment exceeds invoice amount due');
-    }
 
     const newPaid = currentPaid + amountNum;
-    const newBalance = amountDue - newPaid;
+    const rawBalance = amountDue - newPaid;
+    // Clamp balance at 0 — any excess is carried forward to the next invoice
+    const newBalance = rawBalance < 0 ? 0 : rawBalance;
+    const creditAmount = rawBalance < 0 ? Math.abs(rawBalance) : 0;
 
-    let status: PaymentStatus;
-    if (newBalance <= 0) {
-      status = PaymentStatus.PAID;
-    } else if (newPaid > 0) {
-      status = PaymentStatus.PARTIAL;
-    } else {
-      const dueDate = new Date(invoice.dueDate);
-      status = dueDate < new Date() ? PaymentStatus.OVERDUE : PaymentStatus.PENDING;
-    }
+    const status: PaymentStatus =
+      newBalance <= 0 ? PaymentStatus.PAID : newPaid > 0 ? PaymentStatus.PARTIAL : PaymentStatus.PENDING;
 
     const [payment] = await this.prisma.$transaction([
       this.prisma.payment.create({
@@ -174,14 +167,57 @@ export class FinanceService {
       this.prisma.feeInvoice.update({
         where: { id: dto.invoiceId },
         data: {
-          amountPaid: newPaid,
+          amountPaid: newPaid > amountDue ? amountDue : newPaid,
           balance: newBalance,
           status,
         },
       }),
     ]);
 
-    return payment;
+    // Carry forward any credit to the student's next pending invoice
+    if (creditAmount > 0) {
+      const nextInvoice = await this.prisma.feeInvoice.findFirst({
+        where: {
+          studentId: dto.studentId,
+          status: { in: [PaymentStatus.PENDING, PaymentStatus.PARTIAL, PaymentStatus.OVERDUE] },
+          id: { not: dto.invoiceId },
+        },
+        orderBy: { dueDate: 'asc' },
+      });
+
+      if (nextInvoice) {
+        const nextPaid = Number(nextInvoice.amountPaid) + creditAmount;
+        const nextDue = Number(nextInvoice.amountDue);
+        const nextBalance = Math.max(0, nextDue - nextPaid);
+        const nextStatus: PaymentStatus =
+          nextBalance <= 0 ? PaymentStatus.PAID : nextPaid > 0 ? PaymentStatus.PARTIAL : PaymentStatus.PENDING;
+
+        await this.prisma.$transaction([
+          this.prisma.payment.create({
+            data: {
+              studentId: dto.studentId,
+              invoiceId: nextInvoice.id,
+              amount: Math.min(creditAmount, nextDue - Number(nextInvoice.amountPaid)),
+              method: dto.method,
+              reference: dto.reference,
+              paidBy: dto.paidBy,
+              recordedBy: recordedById,
+              notes: `Credit carried forward from invoice ${dto.invoiceId}`,
+            },
+          }),
+          this.prisma.feeInvoice.update({
+            where: { id: nextInvoice.id },
+            data: {
+              amountPaid: nextPaid > nextDue ? nextDue : nextPaid,
+              balance: nextBalance,
+              status: nextStatus,
+            },
+          }),
+        ]);
+      }
+    }
+
+    return { ...payment, creditCarriedForward: creditAmount };
   }
 
   async getPayments(page = 1, limit = 10) {

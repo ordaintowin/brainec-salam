@@ -33,10 +33,15 @@ export class UsersService {
     return safe;
   }
 
-  async findAll(page = 1, limit = 10) {
+  async findAll(page = 1, limit = 10, excludeRole?: Role) {
     const skip = (page - 1) * limit;
+    const where: any = {};
+    if (excludeRole) {
+      where.role = { not: excludeRole };
+    }
     const [data, total] = await Promise.all([
       this.prisma.user.findMany({
+        where,
         skip,
         take: limit,
         orderBy: { createdAt: 'desc' },
@@ -51,7 +56,7 @@ export class UsersService {
           updatedAt: true,
         },
       }),
-      this.prisma.user.count(),
+      this.prisma.user.count({ where }),
     ]);
     return {
       data,
