@@ -60,6 +60,11 @@ export class FinanceController {
     return this.financeService.getPayments(page, limit);
   }
 
+  @Get('fee-orders/:id/summary')
+  getFeeOrderSummary(@Param('id') id: string) {
+    return this.financeService.getFeeOrderSummary(id);
+  }
+
   @Get('summary')
   getSummary() {
     return this.financeService.getSummary();

@@ -1,6 +1,7 @@
 'use client';
 import { useEffect, useState, useCallback } from 'react';
-import { Plus, X, Loader2, Download, Printer } from 'lucide-react';
+import Link from 'next/link';
+import { Plus, X, Loader2, Download, Printer, ChevronRight } from 'lucide-react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
@@ -449,20 +450,86 @@ export default function FinancePage() {
         <div className="space-y-6">
           {summary ? (
             <>
-              <div className="grid grid-cols-3 gap-4">
-                <div className="bg-white rounded-xl border border-gray-200 p-5">
-                  <p className="text-xs text-gray-400 uppercase tracking-wider">Total Collected</p>
-                  <p className="text-2xl font-bold text-green-600 mt-1">{formatCurrency(summary.totalCollected)}</p>
-                </div>
-                <div className="bg-white rounded-xl border border-gray-200 p-5">
-                  <p className="text-xs text-gray-400 uppercase tracking-wider">Outstanding</p>
-                  <p className="text-2xl font-bold text-red-600 mt-1">{formatCurrency(summary.totalOutstanding)}</p>
-                </div>
-                <div className="bg-white rounded-xl border border-gray-200 p-5">
-                  <p className="text-xs text-gray-400 uppercase tracking-wider">Overdue</p>
-                  <p className="text-2xl font-bold text-orange-600 mt-1">{formatCurrency(summary.totalOverdue)}</p>
-                </div>
+              {/* Clickable Overall Stats */}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <Link
+                  href="/dashboard/finance/summary/collected"
+                  className="bg-white rounded-xl border border-gray-200 p-5 hover:shadow-md transition-shadow cursor-pointer group"
+                >
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-xs text-gray-400 uppercase tracking-wider">Total Collected</p>
+                      <p className="text-2xl font-bold text-green-600 mt-1">{formatCurrency(summary.totalCollected)}</p>
+                    </div>
+                    <ChevronRight className="w-5 h-5 text-gray-300 group-hover:text-gray-500 transition-colors" />
+                  </div>
+                </Link>
+                <Link
+                  href="/dashboard/finance/summary/outstanding"
+                  className="bg-white rounded-xl border border-gray-200 p-5 hover:shadow-md transition-shadow cursor-pointer group"
+                >
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-xs text-gray-400 uppercase tracking-wider">Outstanding</p>
+                      <p className="text-2xl font-bold text-red-600 mt-1">{formatCurrency(summary.totalOutstanding)}</p>
+                    </div>
+                    <ChevronRight className="w-5 h-5 text-gray-300 group-hover:text-gray-500 transition-colors" />
+                  </div>
+                </Link>
+                <Link
+                  href="/dashboard/finance/summary/overdue"
+                  className="bg-white rounded-xl border border-gray-200 p-5 hover:shadow-md transition-shadow cursor-pointer group"
+                >
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-xs text-gray-400 uppercase tracking-wider">Overdue</p>
+                      <p className="text-2xl font-bold text-orange-600 mt-1">{formatCurrency(summary.totalOverdue)}</p>
+                    </div>
+                    <ChevronRight className="w-5 h-5 text-gray-300 group-hover:text-gray-500 transition-colors" />
+                  </div>
+                </Link>
               </div>
+
+              {/* Fee Order Dashboard Cards */}
+              {summary.feeOrderBreakdown && summary.feeOrderBreakdown.length > 0 && (
+                <div className="space-y-4">
+                  <h3 className="text-sm font-semibold text-gray-800">Fee Orders — click to view details</h3>
+                  {summary.feeOrderBreakdown.map((fo) => (
+                    <Link
+                      key={fo.feeOrderId}
+                      href={`/dashboard/finance/orders/${fo.feeOrderId}`}
+                      className="block bg-white rounded-xl border border-gray-200 p-5 hover:shadow-md transition-shadow group"
+                    >
+                      <div className="flex items-center justify-between mb-3">
+                        <div>
+                          <h4 className="font-semibold text-gray-900 group-hover:text-[#16a34a] transition-colors">{fo.title}</h4>
+                          <p className="text-xs text-gray-400 mt-0.5">
+                            {fo.invoiceCount} invoice{fo.invoiceCount !== 1 ? 's' : ''} · Due: {formatDate(fo.dueDate)} · Unit: {formatCurrency(fo.amount)}
+                          </p>
+                        </div>
+                        <ChevronRight className="w-5 h-5 text-gray-300 group-hover:text-gray-500 transition-colors shrink-0" />
+                      </div>
+
+                      <div className="grid grid-cols-3 gap-3">
+                        <div className="bg-gray-50 rounded-lg p-3 text-center">
+                          <p className="text-xs text-gray-400 uppercase">To Collect</p>
+                          <p className="text-lg font-bold text-gray-800">{formatCurrency(fo.totalToCollect)}</p>
+                        </div>
+                        <div className="bg-green-50 rounded-lg p-3 text-center">
+                          <p className="text-xs text-gray-400 uppercase">Collected</p>
+                          <p className="text-lg font-bold text-green-700">{formatCurrency(fo.totalCollected)}</p>
+                          <p className="text-xs text-gray-400">{fo.paidStudents.length} paid</p>
+                        </div>
+                        <div className="bg-red-50 rounded-lg p-3 text-center">
+                          <p className="text-xs text-gray-400 uppercase">Outstanding</p>
+                          <p className="text-lg font-bold text-red-600">{formatCurrency(fo.totalOutstanding)}</p>
+                          <p className="text-xs text-gray-400">{fo.owingStudents.length} owing</p>
+                        </div>
+                      </div>
+                    </Link>
+                  ))}
+                </div>
+              )}
 
               {/* Per-Class Breakdown */}
               {summary.perClassBreakdown && summary.perClassBreakdown.length > 0 && (
@@ -488,99 +555,6 @@ export default function FinancePage() {
                       </tbody>
                     </table>
                   </div>
-                </div>
-              )}
-
-              {/* Fee Order Breakdown */}
-              {summary.feeOrderBreakdown && summary.feeOrderBreakdown.length > 0 && (
-                <div className="space-y-4">
-                  <h3 className="text-sm font-semibold text-gray-800">Fee Order Details</h3>
-                  {summary.feeOrderBreakdown.map((fo) => (
-                    <div key={fo.feeOrderId} className="bg-white rounded-xl border border-gray-200 p-6">
-                      <div className="flex items-center justify-between mb-4">
-                        <div>
-                          <h4 className="font-semibold text-gray-900">{fo.title}</h4>
-                          <p className="text-xs text-gray-400 mt-0.5">
-                            {fo.invoiceCount} invoice{fo.invoiceCount !== 1 ? 's' : ''} · Due: {formatDate(fo.dueDate)}
-                          </p>
-                        </div>
-                        <span className="text-sm font-medium text-gray-500">Unit: {formatCurrency(fo.amount)}</span>
-                      </div>
-
-                      <div className="grid grid-cols-3 gap-3 mb-4">
-                        <div className="bg-gray-50 rounded-lg p-3 text-center">
-                          <p className="text-xs text-gray-400 uppercase">To Collect</p>
-                          <p className="text-lg font-bold text-gray-800">{formatCurrency(fo.totalToCollect)}</p>
-                        </div>
-                        <div className="bg-green-50 rounded-lg p-3 text-center">
-                          <p className="text-xs text-gray-400 uppercase">Collected</p>
-                          <p className="text-lg font-bold text-green-700">{formatCurrency(fo.totalCollected)}</p>
-                        </div>
-                        <div className="bg-red-50 rounded-lg p-3 text-center">
-                          <p className="text-xs text-gray-400 uppercase">Outstanding</p>
-                          <p className="text-lg font-bold text-red-600">{formatCurrency(fo.totalOutstanding)}</p>
-                        </div>
-                      </div>
-
-                      {/* Paid Students */}
-                      {fo.paidStudents.length > 0 && (
-                        <div className="mb-4">
-                          <h5 className="text-xs font-semibold text-green-700 uppercase tracking-wider mb-2">Paid ({fo.paidStudents.length})</h5>
-                          <div className="overflow-x-auto">
-                            <table className="w-full text-xs">
-                              <thead>
-                                <tr className="bg-green-50 border-b">
-                                  <th className="text-left px-3 py-2 text-gray-500 font-medium">Student</th>
-                                  <th className="text-left px-3 py-2 text-gray-500 font-medium">ID</th>
-                                  <th className="text-left px-3 py-2 text-gray-500 font-medium">Class</th>
-                                  <th className="text-left px-3 py-2 text-gray-500 font-medium">Amount Paid</th>
-                                </tr>
-                              </thead>
-                              <tbody className="divide-y divide-gray-50">
-                                {fo.paidStudents.map((s) => (
-                                  <tr key={s.studentId}>
-                                    <td className="px-3 py-2 font-medium text-gray-700">{s.name}</td>
-                                    <td className="px-3 py-2 text-gray-500">{s.studentId}</td>
-                                    <td className="px-3 py-2 text-gray-500">{s.className}</td>
-                                    <td className="px-3 py-2 text-green-700 font-medium">{formatCurrency(s.amountPaid)}</td>
-                                  </tr>
-                                ))}
-                              </tbody>
-                            </table>
-                          </div>
-                        </div>
-                      )}
-
-                      {/* Owing Students */}
-                      {fo.owingStudents.length > 0 && (
-                        <div>
-                          <h5 className="text-xs font-semibold text-red-700 uppercase tracking-wider mb-2">Owing ({fo.owingStudents.length})</h5>
-                          <div className="overflow-x-auto">
-                            <table className="w-full text-xs">
-                              <thead>
-                                <tr className="bg-red-50 border-b">
-                                  <th className="text-left px-3 py-2 text-gray-500 font-medium">Student</th>
-                                  <th className="text-left px-3 py-2 text-gray-500 font-medium">ID</th>
-                                  <th className="text-left px-3 py-2 text-gray-500 font-medium">Class</th>
-                                  <th className="text-left px-3 py-2 text-gray-500 font-medium">Balance Owed</th>
-                                </tr>
-                              </thead>
-                              <tbody className="divide-y divide-gray-50">
-                                {fo.owingStudents.map((s) => (
-                                  <tr key={s.studentId}>
-                                    <td className="px-3 py-2 font-medium text-gray-700">{s.name}</td>
-                                    <td className="px-3 py-2 text-gray-500">{s.studentId}</td>
-                                    <td className="px-3 py-2 text-gray-500">{s.className}</td>
-                                    <td className="px-3 py-2 text-red-600 font-medium">{formatCurrency(s.balance)}</td>
-                                  </tr>
-                                ))}
-                              </tbody>
-                            </table>
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  ))}
                 </div>
               )}
             </>

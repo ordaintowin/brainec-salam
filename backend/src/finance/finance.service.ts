@@ -273,6 +273,99 @@ export class FinanceService {
     };
   }
 
+  async getFeeOrderSummary(feeOrderId: string) {
+    const feeOrder = await this.prisma.feeOrder.findUnique({
+      where: { id: feeOrderId },
+      include: {
+        class: { select: { id: true, name: true } },
+        _count: { select: { invoices: true } },
+      },
+    });
+    if (!feeOrder) throw new NotFoundException('Fee order not found');
+
+    const invoices = await this.prisma.feeInvoice.findMany({
+      where: { feeOrderId },
+      include: {
+        student: {
+          select: {
+            id: true,
+            studentId: true,
+            firstName: true,
+            lastName: true,
+            classId: true,
+            class: { select: { name: true } },
+          },
+        },
+      },
+    });
+
+    let totalToCollect = 0;
+    let totalCollected = 0;
+    let totalOutstanding = 0;
+    const paidStudents: {
+      id: string;
+      studentId: string;
+      name: string;
+      className: string;
+      amountPaid: number;
+      amountDue: number;
+    }[] = [];
+    const owingStudents: {
+      id: string;
+      studentId: string;
+      name: string;
+      className: string;
+      balance: number;
+      amountDue: number;
+      amountPaid: number;
+    }[] = [];
+
+    for (const inv of invoices) {
+      const due = Number(inv.amountDue);
+      const paid = Number(inv.amountPaid);
+      const bal = Number(inv.balance);
+
+      totalToCollect += due;
+      totalCollected += paid;
+      totalOutstanding += bal;
+
+      const studentInfo = {
+        id: inv.student.id,
+        studentId: inv.student.studentId,
+        name: `${inv.student.firstName} ${inv.student.lastName}`,
+        className: inv.student.class?.name || '—',
+      };
+
+      if (inv.status === PaymentStatus.PAID) {
+        paidStudents.push({ ...studentInfo, amountPaid: paid, amountDue: due });
+      } else if (bal > 0) {
+        owingStudents.push({
+          ...studentInfo,
+          balance: bal,
+          amountDue: due,
+          amountPaid: paid,
+        });
+      }
+    }
+
+    return {
+      feeOrder: {
+        id: feeOrder.id,
+        title: feeOrder.title,
+        description: feeOrder.description,
+        amount: Number(feeOrder.amount),
+        dueDate: feeOrder.dueDate,
+        class: feeOrder.class,
+        invoiceCount: feeOrder._count.invoices,
+      },
+      totalToCollect,
+      totalCollected,
+      totalOutstanding,
+      paidStudents,
+      owingStudents,
+    };
+  }
+
   async getSummary() {
     const [invoices, classes, feeOrders] = await Promise.all([
       this.prisma.feeInvoice.findMany({
