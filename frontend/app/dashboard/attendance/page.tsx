@@ -28,6 +28,8 @@ export default function AttendancePage() {
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState('');
+  const [termName, setTermName] = useState<string | null>(null);
+  const [isTermClosed, setIsTermClosed] = useState(false);
 
   const isTeacher = user?.role === 'TEACHER';
 
@@ -59,10 +61,22 @@ export default function AttendancePage() {
     try {
       // Fetch class attendance (students + existing records for the date) in one call
       const attRes = await api.get(`/attendance`, { params: { classId: selectedClassId, date: selectedDate } });
-      const attRecords: Array<{
+
+      // Handle both old format (array) and new format (object with records/term info)
+      let attRecords: Array<{
         student: { id: string; studentId: string; firstName: string; lastName: string };
         attendance: { status: string; notes?: string } | null;
-      }> = Array.isArray(attRes.data) ? attRes.data : [];
+      }>;
+
+      if (Array.isArray(attRes.data)) {
+        attRecords = attRes.data;
+        setTermName(null);
+        setIsTermClosed(false);
+      } else {
+        attRecords = attRes.data?.records || [];
+        setTermName(attRes.data?.termName || null);
+        setIsTermClosed(attRes.data?.isTermClosed || false);
+      }
 
       setStudents(
         attRecords.map(r => ({
@@ -173,6 +187,18 @@ export default function AttendancePage() {
         <div className="mb-4 p-3 bg-red-50 border border-red-200 text-red-700 rounded-lg text-sm">{error}</div>
       )}
 
+      {/* Term Info Banner */}
+      {termName && (
+        <div className={`mb-4 p-3 rounded-lg text-sm flex items-center justify-between ${
+          isTermClosed ? 'bg-gray-100 border border-gray-200 text-gray-600' : 'bg-green-50 border border-green-200 text-green-700'
+        }`}>
+          <span>
+            <strong>Term:</strong> {termName}
+            {isTermClosed && <span className="ml-2 text-xs font-medium bg-gray-200 text-gray-600 px-2 py-0.5 rounded-full">CLOSED — editing disabled</span>}
+          </span>
+        </div>
+      )}
+
       {saved && (
         <div className="mb-4 p-3 bg-green-50 border border-green-200 text-green-700 rounded-lg text-sm">
           Attendance saved successfully!
@@ -222,11 +248,12 @@ export default function AttendancePage() {
                           <button
                             key={status}
                             onClick={() => toggleStatus(student.id, status)}
+                            disabled={isTermClosed}
                             className={`px-3 py-1 rounded-full text-xs font-medium transition-all ${
                               student.status === status
                                 ? `${statusConfig[status].classes} ring-2`
                                 : 'bg-gray-100 text-gray-500 hover:bg-gray-200'
-                            }`}
+                            } ${isTermClosed ? 'opacity-60 cursor-not-allowed' : ''}`}
                           >
                             {statusConfig[status].label}
                           </button>
@@ -239,7 +266,8 @@ export default function AttendancePage() {
                         value={student.notes}
                         onChange={e => updateNotes(student.id, e.target.value)}
                         placeholder="Optional note…"
-                        className="w-full px-2 py-1 border border-gray-200 rounded text-xs focus:outline-none focus:ring-1 focus:ring-[#16a34a]"
+                        disabled={isTermClosed}
+                        className={`w-full px-2 py-1 border border-gray-200 rounded text-xs focus:outline-none focus:ring-1 focus:ring-[#16a34a] ${isTermClosed ? 'bg-gray-50 cursor-not-allowed' : ''}`}
                       />
                     </td>
                   </tr>
@@ -251,7 +279,7 @@ export default function AttendancePage() {
           <div className="flex justify-end">
             <button
               onClick={saveAttendance}
-              disabled={saving}
+              disabled={saving || isTermClosed}
               className="flex items-center gap-2 bg-[#16a34a] hover:bg-green-700 text-white px-6 py-2.5 rounded-lg text-sm font-medium disabled:opacity-60"
             >
               {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}

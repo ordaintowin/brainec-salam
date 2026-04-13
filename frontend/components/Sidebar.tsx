@@ -13,6 +13,7 @@ import {
   ShieldCheck,
   LogOut,
   School,
+  CalendarRange,
 } from 'lucide-react';
 import { useAuth } from '@/lib/auth';
 import InitialsAvatar from './InitialsAvatar';
@@ -31,6 +32,7 @@ const navItems: NavItem[] = [
   { label: 'Classes', href: '/dashboard/classes', icon: <BookOpen className="w-5 h-5" />, roles: ['HEADMISTRESS', 'ADMIN'] },
   { label: 'Finance', href: '/dashboard/finance', icon: <DollarSign className="w-5 h-5" />, roles: ['HEADMISTRESS', 'ADMIN'] },
   { label: 'Attendance', href: '/dashboard/attendance', icon: <ClipboardList className="w-5 h-5" /> },
+  { label: 'Terms', href: '/dashboard/terms', icon: <CalendarRange className="w-5 h-5" />, roles: ['HEADMISTRESS'] },
   { label: 'Archive', href: '/dashboard/archive', icon: <Archive className="w-5 h-5" />, roles: ['HEADMISTRESS', 'ADMIN'] },
   { label: 'Activity Logs', href: '/dashboard/logs', icon: <ScrollText className="w-5 h-5" />, roles: ['HEADMISTRESS', 'ADMIN'] },
   { label: 'Admins', href: '/dashboard/admins', icon: <ShieldCheck className="w-5 h-5" />, roles: ['HEADMISTRESS'] },

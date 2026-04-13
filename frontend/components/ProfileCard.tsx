@@ -1,4 +1,5 @@
 'use client';
+import { useState } from 'react';
 
 interface ProfileCardProps {
   name: string;
@@ -19,17 +20,22 @@ function getInitials(name: string) {
 }
 
 export default function ProfileCard({ name, photoUrl, idBadge, subtitle, details = [], children }: ProfileCardProps) {
+  const [imgError, setImgError] = useState(false);
+
+  const showPhoto = photoUrl && !imgError;
+
   return (
     <div className="bg-white rounded-xl border border-gray-200 p-6">
       <div className="flex items-start gap-6">
         {/* Avatar */}
         <div className="shrink-0">
-          {photoUrl ? (
+          {showPhoto ? (
             // eslint-disable-next-line @next/next/no-img-element
             <img
               src={photoUrl}
               alt={name}
               className="w-24 h-24 rounded-full object-cover border-4 border-[#16a34a]/20"
+              onError={() => setImgError(true)}
             />
           ) : (
             <div className="w-24 h-24 rounded-full bg-[#16a34a] flex items-center justify-center border-4 border-[#16a34a]/20">

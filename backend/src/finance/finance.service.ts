@@ -115,7 +115,7 @@ export class FinanceService {
     });
     if (!student) throw new NotFoundException('Student not found');
 
-    return this.prisma.feeInvoice.findMany({
+    const invoices = await this.prisma.feeInvoice.findMany({
       where: { studentId },
       orderBy: { createdAt: 'desc' },
       include: {
@@ -123,6 +123,14 @@ export class FinanceService {
         payments: { orderBy: { paidAt: 'desc' } },
       },
     });
+
+    return invoices.map((inv) => ({
+      ...inv,
+      creditBalance: this.computeCreditBalance(
+        Number(inv.amountPaid),
+        Number(inv.amountDue),
+      ),
+    }));
   }
 
   async recordPayment(dto: RecordPaymentDto, recordedById: string) {
@@ -226,6 +234,12 @@ export class FinanceService {
     return { ...payment, creditCarriedForward: creditAmount };
   }
 
+  /** Compute how much overpayment credit a student has on a specific invoice */
+  private computeCreditBalance(amountPaid: number, amountDue: number): number {
+    const excess = amountPaid - amountDue;
+    return excess > 0 ? excess : 0;
+  }
+
   async getPayments(page = 1, limit = 10) {
     const skip = (page - 1) * limit;
     const [data, total] = await Promise.all([
@@ -260,37 +274,118 @@ export class FinanceService {
   }
 
   async getSummary() {
-    const [invoices, classes] = await Promise.all([
+    const [invoices, classes, feeOrders] = await Promise.all([
       this.prisma.feeInvoice.findMany({
         select: {
           amountDue: true,
           amountPaid: true,
           balance: true,
           status: true,
-          student: { select: { classId: true, class: { select: { name: true } } } },
+          feeOrderId: true,
+          student: {
+            select: {
+              id: true,
+              studentId: true,
+              firstName: true,
+              lastName: true,
+              classId: true,
+              class: { select: { name: true } },
+            },
+          },
         },
       }),
       this.prisma.class.findMany({ select: { id: true, name: true } }),
+      this.prisma.feeOrder.findMany({
+        select: { id: true, title: true, amount: true, dueDate: true },
+        orderBy: { createdAt: 'desc' },
+      }),
     ]);
 
     let totalCollected = 0;
     let totalOutstanding = 0;
     let totalOverdue = 0;
 
-    const classMap: Record<string, { name: string; collected: number; outstanding: number }> = {};
+    const classMap: Record<
+      string,
+      { name: string; collected: number; outstanding: number }
+    > = {};
     classes.forEach((c) => {
       classMap[c.id] = { name: c.name, collected: 0, outstanding: 0 };
     });
 
+    // Per-fee-order breakdown
+    const feeOrderMap: Record<
+      string,
+      {
+        title: string;
+        amount: number;
+        dueDate: Date;
+        totalToCollect: number;
+        totalCollected: number;
+        totalOutstanding: number;
+        invoiceCount: number;
+        paidStudents: {
+          studentId: string;
+          name: string;
+          className: string;
+          amountPaid: number;
+        }[];
+        owingStudents: {
+          studentId: string;
+          name: string;
+          className: string;
+          balance: number;
+        }[];
+      }
+    > = {};
+    feeOrders.forEach((fo) => {
+      feeOrderMap[fo.id] = {
+        title: fo.title,
+        amount: Number(fo.amount),
+        dueDate: fo.dueDate,
+        totalToCollect: 0,
+        totalCollected: 0,
+        totalOutstanding: 0,
+        invoiceCount: 0,
+        paidStudents: [],
+        owingStudents: [],
+      };
+    });
+
     for (const inv of invoices) {
-      totalCollected += Number(inv.amountPaid);
-      totalOutstanding += Number(inv.balance);
-      if (inv.status === PaymentStatus.OVERDUE) totalOverdue += Number(inv.balance);
+      const paid = Number(inv.amountPaid);
+      const bal = Number(inv.balance);
+      const due = Number(inv.amountDue);
+
+      totalCollected += paid;
+      totalOutstanding += bal;
+      if (inv.status === PaymentStatus.OVERDUE) totalOverdue += bal;
 
       const cid = inv.student.classId;
       if (classMap[cid]) {
-        classMap[cid].collected += Number(inv.amountPaid);
-        classMap[cid].outstanding += Number(inv.balance);
+        classMap[cid].collected += paid;
+        classMap[cid].outstanding += bal;
+      }
+
+      // Fee order breakdown
+      const foEntry = feeOrderMap[inv.feeOrderId];
+      if (foEntry) {
+        foEntry.totalToCollect += due;
+        foEntry.totalCollected += paid;
+        foEntry.totalOutstanding += bal;
+        foEntry.invoiceCount += 1;
+
+        const studentInfo = {
+          studentId: inv.student.studentId,
+          name: `${inv.student.firstName} ${inv.student.lastName}`,
+          className: inv.student.class?.name || '—',
+        };
+
+        if (inv.status === PaymentStatus.PAID) {
+          foEntry.paidStudents.push({ ...studentInfo, amountPaid: paid });
+        } else if (bal > 0) {
+          foEntry.owingStudents.push({ ...studentInfo, balance: bal });
+        }
       }
     }
 
@@ -303,6 +398,18 @@ export class FinanceService {
         className: v.name,
         collected: v.collected,
         outstanding: v.outstanding,
+      })),
+      feeOrderBreakdown: Object.entries(feeOrderMap).map(([id, v]) => ({
+        feeOrderId: id,
+        title: v.title,
+        amount: v.amount,
+        dueDate: v.dueDate,
+        totalToCollect: v.totalToCollect,
+        totalCollected: v.totalCollected,
+        totalOutstanding: v.totalOutstanding,
+        invoiceCount: v.invoiceCount,
+        paidStudents: v.paidStudents,
+        owingStudents: v.owingStudents,
       })),
     };
   }

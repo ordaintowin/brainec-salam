@@ -26,6 +26,27 @@ enum AttendanceStatus {
   LATE
 }
 
+enum TermStatus {
+  ACTIVE
+  CLOSED
+}
+
+model Term {
+  id          String     @id @default(cuid())
+  name        String
+  startDate   DateTime   @db.Date
+  endDate     DateTime   @db.Date
+  status      TermStatus @default(ACTIVE)
+  createdById String
+  closedById  String?
+  closedAt    DateTime?
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+  attendances Attendance[]
+
+  @@map("terms")
+}
+
 model User {
   id           String        @id @default(cuid())
   name         String
@@ -167,6 +188,8 @@ model Attendance {
   status    AttendanceStatus @default(PRESENT)
   markedBy  String
   notes     String?
+  termId    String?
+  term      Term?            @relation(fields: [termId], references: [id])
   createdAt DateTime         @default(now())
 
   @@unique([studentId, date])
