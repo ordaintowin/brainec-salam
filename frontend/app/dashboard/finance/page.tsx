@@ -1,7 +1,7 @@
 'use client';
 import { useEffect, useState, useCallback } from 'react';
 import Link from 'next/link';
-import { Plus, X, Loader2, Download, Printer, ChevronRight } from 'lucide-react';
+import { Plus, X, Loader2, Download, Printer, ChevronRight, ChevronDown } from 'lucide-react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
@@ -96,6 +96,18 @@ export default function FinancePage() {
     open: false, invoiceId: '', studentId: '', balance: 0,
   });
   const [printModal, setPrintModal] = useState<{ open: boolean; invoice: Invoice | null }>({ open: false, invoice: null });
+  const [expandedFeeOrders, setExpandedFeeOrders] = useState<Set<string>>(new Set());
+  const [summaryPage, setSummaryPage] = useState(1);
+  const summaryPerPage = 5;
+
+  const toggleFeeOrderExpanded = (id: string) => {
+    setExpandedFeeOrders(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
 
   const {
     register,
@@ -490,73 +502,83 @@ export default function FinancePage() {
                 </Link>
               </div>
 
-              {/* Fee Order Dashboard Cards */}
-              {summary.feeOrderBreakdown && summary.feeOrderBreakdown.length > 0 && (
-                <div className="space-y-4">
-                  <h3 className="text-sm font-semibold text-gray-800">Fee Orders — click to view details</h3>
-                  {summary.feeOrderBreakdown.map((fo) => (
-                    <Link
-                      key={fo.feeOrderId}
-                      href={`/dashboard/finance/orders/${fo.feeOrderId}`}
-                      className="block bg-white rounded-xl border border-gray-200 p-5 hover:shadow-md transition-shadow group"
-                    >
-                      <div className="flex items-center justify-between mb-3">
-                        <div>
-                          <h4 className="font-semibold text-gray-900 group-hover:text-[#16a34a] transition-colors">{fo.title}</h4>
-                          <p className="text-xs text-gray-400 mt-0.5">
-                            {fo.invoiceCount} invoice{fo.invoiceCount !== 1 ? 's' : ''} · Due: {formatDate(fo.dueDate)} · Unit: {formatCurrency(fo.amount)}
-                          </p>
-                        </div>
-                        <ChevronRight className="w-5 h-5 text-gray-300 group-hover:text-gray-500 transition-colors shrink-0" />
-                      </div>
+              {/* Fee Orders — collapsible details */}
+              {summary.feeOrderBreakdown && summary.feeOrderBreakdown.length > 0 && (() => {
+                const totalFeeOrders = summary.feeOrderBreakdown.length;
+                const totalSummaryPages = Math.ceil(totalFeeOrders / summaryPerPage);
+                const paginatedFeeOrders = summary.feeOrderBreakdown.slice(
+                  (summaryPage - 1) * summaryPerPage,
+                  summaryPage * summaryPerPage
+                );
+                return (
+                  <div className="space-y-4">
+                    <h3 className="text-sm font-semibold text-gray-800">Fee Orders — click to view details</h3>
+                    {paginatedFeeOrders.map((fo) => {
+                      const isExpanded = expandedFeeOrders.has(fo.feeOrderId);
+                      return (
+                        <div key={fo.feeOrderId} className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+                          <button
+                            type="button"
+                            onClick={() => toggleFeeOrderExpanded(fo.feeOrderId)}
+                            className="w-full p-5 text-left hover:bg-gray-50 transition-colors"
+                          >
+                            <div className="flex items-center justify-between">
+                              <div>
+                                <h4 className="font-semibold text-gray-900">{fo.title}</h4>
+                                <p className="text-xs text-gray-400 mt-0.5">
+                                  {fo.invoiceCount} invoice{fo.invoiceCount !== 1 ? 's' : ''} · Due: {formatDate(fo.dueDate)} · Unit: {formatCurrency(fo.amount)}
+                                </p>
+                              </div>
+                              <div className="flex items-center gap-2 shrink-0">
+                                <Link
+                                  href={`/dashboard/finance/orders/${fo.feeOrderId}`}
+                                  onClick={(e) => e.stopPropagation()}
+                                  className="text-xs text-[#16a34a] hover:underline"
+                                >
+                                  Full Details
+                                </Link>
+                                <ChevronDown className={`w-5 h-5 text-gray-400 transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
+                              </div>
+                            </div>
+                          </button>
 
-                      <div className="grid grid-cols-3 gap-3">
-                        <div className="bg-gray-50 rounded-lg p-3 text-center">
-                          <p className="text-xs text-gray-400 uppercase">To Collect</p>
-                          <p className="text-lg font-bold text-gray-800">{formatCurrency(fo.totalToCollect)}</p>
+                          {isExpanded && (
+                            <div className="px-5 pb-5 border-t border-gray-100 pt-4">
+                              <div className="grid grid-cols-3 gap-3">
+                                <div className="bg-gray-50 rounded-lg p-3 text-center">
+                                  <p className="text-xs text-gray-400 uppercase">To Collect</p>
+                                  <p className="text-lg font-bold text-gray-800">{formatCurrency(fo.totalToCollect)}</p>
+                                </div>
+                                <div className="bg-green-50 rounded-lg p-3 text-center">
+                                  <p className="text-xs text-gray-400 uppercase">Collected</p>
+                                  <p className="text-lg font-bold text-green-700">{formatCurrency(fo.totalCollected)}</p>
+                                  <p className="text-xs text-gray-400">{fo.paidStudents.length} paid</p>
+                                </div>
+                                <div className="bg-red-50 rounded-lg p-3 text-center">
+                                  <p className="text-xs text-gray-400 uppercase">Outstanding</p>
+                                  <p className="text-lg font-bold text-red-600">{formatCurrency(fo.totalOutstanding)}</p>
+                                  <p className="text-xs text-gray-400">{fo.owingStudents.length} owing</p>
+                                </div>
+                              </div>
+                            </div>
+                          )}
                         </div>
-                        <div className="bg-green-50 rounded-lg p-3 text-center">
-                          <p className="text-xs text-gray-400 uppercase">Collected</p>
-                          <p className="text-lg font-bold text-green-700">{formatCurrency(fo.totalCollected)}</p>
-                          <p className="text-xs text-gray-400">{fo.paidStudents.length} paid</p>
-                        </div>
-                        <div className="bg-red-50 rounded-lg p-3 text-center">
-                          <p className="text-xs text-gray-400 uppercase">Outstanding</p>
-                          <p className="text-lg font-bold text-red-600">{formatCurrency(fo.totalOutstanding)}</p>
-                          <p className="text-xs text-gray-400">{fo.owingStudents.length} owing</p>
+                      );
+                    })}
+
+                    {/* Summary Pagination */}
+                    {totalSummaryPages > 1 && (
+                      <div className="flex items-center justify-between mt-4">
+                        <p className="text-sm text-gray-500">Page {summaryPage} of {totalSummaryPages} ({totalFeeOrders} fee order{totalFeeOrders !== 1 ? 's' : ''})</p>
+                        <div className="flex gap-1">
+                          <button onClick={() => setSummaryPage(p => p - 1)} disabled={summaryPage <= 1} className="px-3 py-1.5 text-sm border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-40">Previous</button>
+                          <button onClick={() => setSummaryPage(p => p + 1)} disabled={summaryPage >= totalSummaryPages} className="px-3 py-1.5 text-sm border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-40">Next</button>
                         </div>
                       </div>
-                    </Link>
-                  ))}
-                </div>
-              )}
-
-              {/* Per-Class Breakdown */}
-              {summary.perClassBreakdown && summary.perClassBreakdown.length > 0 && (
-                <div className="bg-white rounded-xl border border-gray-200 p-6">
-                  <h3 className="text-sm font-semibold text-gray-800 mb-4">Per-Class Breakdown</h3>
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-sm">
-                      <thead>
-                        <tr className="bg-gray-50 border-b">
-                          <th className="text-left px-4 py-2.5 text-xs text-gray-400 font-medium">Class</th>
-                          <th className="text-left px-4 py-2.5 text-xs text-gray-400 font-medium">Collected</th>
-                          <th className="text-left px-4 py-2.5 text-xs text-gray-400 font-medium">Outstanding</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-gray-100">
-                        {summary.perClassBreakdown.map((row) => (
-                          <tr key={row.classId} className="hover:bg-gray-50">
-                            <td className="px-4 py-3 font-medium text-gray-800">{row.className}</td>
-                            <td className="px-4 py-3 text-green-700">{formatCurrency(row.collected)}</td>
-                            <td className="px-4 py-3 text-red-600">{formatCurrency(row.outstanding)}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
+                    )}
                   </div>
-                </div>
-              )}
+                );
+              })()}
             </>
           ) : (
             <p className="text-gray-400">Loading summary…</p>
