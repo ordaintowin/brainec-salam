@@ -1,6 +1,6 @@
 'use client';
 import { useEffect, useState, useCallback } from 'react';
-import { Plus, X, Loader2 } from 'lucide-react';
+import { Plus, X, Loader2, Download, Printer } from 'lucide-react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
@@ -9,7 +9,8 @@ import { useAuth } from '@/lib/auth';
 import PaymentStatusBadge from '@/components/PaymentStatusBadge';
 import LiveSearch from '@/components/LiveSearch';
 import RecordPaymentModal from '@/components/RecordPaymentModal';
-import { formatCurrency, formatDate } from '@/lib/utils';
+import PrintInvoiceModal from '@/components/PrintInvoiceModal';
+import { formatCurrency, formatDate, exportToCSV } from '@/lib/utils';
 
 type ActiveTab = 'feeOrders' | 'invoices' | 'payments' | 'summary';
 
@@ -79,6 +80,7 @@ export default function FinancePage() {
   const [paymentModal, setPaymentModal] = useState<{ open: boolean; invoiceId: string; studentId: string; balance: number }>({
     open: false, invoiceId: '', studentId: '', balance: 0,
   });
+  const [printModal, setPrintModal] = useState<{ open: boolean; invoice: Invoice | null }>({ open: false, invoice: null });
 
   const {
     register,
@@ -196,6 +198,47 @@ export default function FinancePage() {
             Create Fee Order
           </button>
         )}
+        {activeTab === 'invoices' && invoices.length > 0 && (
+          <button
+            onClick={() => exportToCSV(
+              invoices.map(inv => ({
+                'Student': `${inv.student?.firstName} ${inv.student?.lastName}`,
+                'Student ID': inv.student?.studentId || '',
+                'Fee Order': inv.feeOrder?.title || '',
+                'Amount Due': Number(inv.amountDue).toFixed(2),
+                'Amount Paid': Number(inv.amountPaid).toFixed(2),
+                'Balance': Number(inv.balance).toFixed(2),
+                'Status': inv.status,
+                'Due Date': inv.dueDate ? formatDate(inv.dueDate) : '',
+              })),
+              'invoices',
+            )}
+            className="flex items-center gap-2 border border-gray-300 text-gray-700 hover:bg-gray-50 px-4 py-2 rounded-lg text-sm font-medium"
+          >
+            <Download className="w-4 h-4" />
+            Export CSV
+          </button>
+        )}
+        {activeTab === 'payments' && payments.length > 0 && (
+          <button
+            onClick={() => exportToCSV(
+              payments.map(p => ({
+                'Date': p.paidAt ? formatDate(p.paidAt) : '',
+                'Student': `${p.student?.firstName} ${p.student?.lastName}`,
+                'Fee Order': p.invoice?.feeOrder?.title || '',
+                'Amount': Number(p.amount).toFixed(2),
+                'Method': p.method,
+                'Reference': p.reference || '',
+                'Paid By': p.paidBy,
+              })),
+              'payments',
+            )}
+            className="flex items-center gap-2 border border-gray-300 text-gray-700 hover:bg-gray-50 px-4 py-2 rounded-lg text-sm font-medium"
+          >
+            <Download className="w-4 h-4" />
+            Export CSV
+          </button>
+        )}
       </div>
 
       {/* Tabs */}
@@ -293,14 +336,23 @@ export default function FinancePage() {
                       <td className="px-4 py-3 text-gray-600">{formatDate(inv.dueDate)}</td>
                       {canManage && (
                         <td className="px-4 py-3">
-                          {inv.balance > 0 && (
+                          <div className="flex items-center gap-2">
+                            {inv.balance > 0 && (
+                              <button
+                                onClick={() => setPaymentModal({ open: true, invoiceId: inv.id, studentId: inv.student?.id ?? '', balance: inv.balance })}
+                                className="text-xs bg-[#16a34a] hover:bg-green-700 text-white px-3 py-1 rounded-md"
+                              >
+                                Record Payment
+                              </button>
+                            )}
                             <button
-                              onClick={() => setPaymentModal({ open: true, invoiceId: inv.id, studentId: inv.student?.id ?? '', balance: inv.balance })}
-                              className="text-xs bg-[#16a34a] hover:bg-green-700 text-white px-3 py-1 rounded-md"
+                              onClick={() => setPrintModal({ open: true, invoice: inv })}
+                              className="p-1.5 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded"
+                              title="Print invoice"
                             >
-                              Record Payment
+                              <Printer className="w-4 h-4" />
                             </button>
-                          )}
+                          </div>
                         </td>
                       )}
                     </tr>
@@ -336,11 +388,12 @@ export default function FinancePage() {
                 <th className="text-left px-4 py-3 text-xs text-gray-400 font-medium uppercase">Method</th>
                 <th className="text-left px-4 py-3 text-xs text-gray-400 font-medium uppercase">Paid By</th>
                 <th className="text-left px-4 py-3 text-xs text-gray-400 font-medium uppercase">Reference</th>
+                <th className="text-left px-4 py-3 text-xs text-gray-400 font-medium uppercase">Receipt</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
               {payments.length === 0 ? (
-                <tr><td colSpan={7} className="px-4 py-8 text-center text-gray-400">No payments recorded.</td></tr>
+                <tr><td colSpan={8} className="px-4 py-8 text-center text-gray-400">No payments recorded.</td></tr>
               ) : (
                 payments.map(p => (
                   <tr key={p.id} className="hover:bg-gray-50">
@@ -353,6 +406,20 @@ export default function FinancePage() {
                     <td className="px-4 py-3 text-gray-600 capitalize">{p.method.replace('_', ' ').toLowerCase()}</td>
                     <td className="px-4 py-3 text-gray-600">{p.paidBy}</td>
                     <td className="px-4 py-3 text-gray-500 font-mono text-xs">{p.reference || '—'}</td>
+                    <td className="px-4 py-3">
+                      {p.invoice && (
+                        <button
+                          onClick={() => {
+                            const inv = invoices.find(i => i.id === p.invoice?.id);
+                            if (inv) setPrintModal({ open: true, invoice: inv });
+                          }}
+                          className="p-1.5 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded"
+                          title="Print receipt"
+                        >
+                          <Printer className="w-4 h-4" />
+                        </button>
+                      )}
+                    </td>
                   </tr>
                 ))
               )}
@@ -473,6 +540,14 @@ export default function FinancePage() {
         balance={paymentModal.balance}
         onSuccess={fetchInvoices}
       />
+
+      {printModal.invoice && (
+        <PrintInvoiceModal
+          isOpen={printModal.open}
+          onClose={() => setPrintModal({ open: false, invoice: null })}
+          invoice={printModal.invoice}
+        />
+      )}
     </div>
   );
 }

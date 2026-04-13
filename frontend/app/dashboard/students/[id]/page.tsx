@@ -1,12 +1,13 @@
 'use client';
 import { useEffect, useState, useCallback } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import { ArrowLeft, Pencil } from 'lucide-react';
+import { ArrowLeft, Pencil, Printer } from 'lucide-react';
 import api from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import ProfileCard from '@/components/ProfileCard';
 import PaymentStatusBadge from '@/components/PaymentStatusBadge';
 import RecordPaymentModal from '@/components/RecordPaymentModal';
+import PrintInvoiceModal from '@/components/PrintInvoiceModal';
 import { formatDate, formatCurrency } from '@/lib/utils';
 
 interface Student {
@@ -27,13 +28,22 @@ interface Student {
 
 interface Invoice {
   id: string;
-  feeOrder?: { title: string };
+  feeOrder?: { title: string; description?: string };
   amountDue: number;
   amountPaid: number;
   balance: number;
   status: string;
   dueDate: string;
   studentId: string;
+  payments?: {
+    id: string;
+    paidAt: string;
+    amount: number;
+    method: string;
+    reference?: string;
+    paidBy: string;
+    notes?: string;
+  }[];
 }
 
 interface AttendanceRecord {
@@ -55,6 +65,7 @@ export default function StudentDetailPage() {
   const [paymentModal, setPaymentModal] = useState<{ open: boolean; invoiceId: string; studentId: string; balance: number }>({
     open: false, invoiceId: '', studentId: '', balance: 0,
   });
+  const [printModal, setPrintModal] = useState<{ open: boolean; invoice: Invoice | null }>({ open: false, invoice: null });
 
   const canManage = user?.role === 'HEADMISTRESS' || user?.role === 'ADMIN';
 
@@ -158,8 +169,7 @@ export default function StudentDetailPage() {
                     <th className="text-left px-4 py-3 text-xs text-gray-400 font-medium">Balance</th>
                     <th className="text-left px-4 py-3 text-xs text-gray-400 font-medium">Status</th>
                     <th className="text-left px-4 py-3 text-xs text-gray-400 font-medium">Due Date</th>
-                    {canManage && <th className="text-left px-4 py-3 text-xs text-gray-400 font-medium">Actions</th>}
-                  </tr>
+                    {canManage && <th className="text-left px-4 py-3 text-xs text-gray-400 font-medium">Actions</th>}                  </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100">
                   {invoices.map(inv => (
@@ -173,14 +183,23 @@ export default function StudentDetailPage() {
                       <td className="px-4 py-3">{formatDate(inv.dueDate)}</td>
                       {canManage && (
                         <td className="px-4 py-3">
-                          {inv.balance > 0 && (
+                          <div className="flex items-center gap-2">
+                            {inv.balance > 0 && (
+                              <button
+                                onClick={() => setPaymentModal({ open: true, invoiceId: inv.id, studentId: inv.studentId, balance: inv.balance })}
+                                className="text-xs bg-[#16a34a] hover:bg-green-700 text-white px-3 py-1 rounded-md"
+                              >
+                                Record Payment
+                              </button>
+                            )}
                             <button
-                              onClick={() => setPaymentModal({ open: true, invoiceId: inv.id, studentId: inv.studentId, balance: inv.balance })}
-                              className="text-xs bg-[#16a34a] hover:bg-green-700 text-white px-3 py-1 rounded-md"
+                              onClick={() => setPrintModal({ open: true, invoice: inv })}
+                              className="p-1.5 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded"
+                              title="Print invoice"
                             >
-                              Record Payment
+                              <Printer className="w-4 h-4" />
                             </button>
-                          )}
+                          </div>
                         </td>
                       )}
                     </tr>
@@ -235,6 +254,24 @@ export default function StudentDetailPage() {
         balance={paymentModal.balance}
         onSuccess={fetchStudent}
       />
+
+      {printModal.invoice && (
+        <PrintInvoiceModal
+          isOpen={printModal.open}
+          onClose={() => setPrintModal({ open: false, invoice: null })}
+          invoice={{
+            ...printModal.invoice,
+            student: {
+              studentId: student.studentId,
+              firstName: student.firstName,
+              lastName: student.lastName,
+              class: student.class,
+              guardianName: student.guardianName,
+              guardianPhone: student.guardianPhone,
+            },
+          }}
+        />
+      )}
     </div>
   );
 }
