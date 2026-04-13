@@ -57,16 +57,20 @@ export default function NewTeacherPage() {
       const res = await api.post('/teachers', payload);
       const teacherId = res.data?.id;
 
-      // Step 2: Upload photo separately if provided
+      // Step 2: Upload photo separately if provided — failure does not block success
       if (photoFile && teacherId) {
-        const formData = new FormData();
-        formData.append('photo', photoFile);
-        await api.post(`/teachers/${teacherId}/photo`, formData, {
-          headers: { 'Content-Type': 'multipart/form-data' },
-        });
+        try {
+          const formData = new FormData();
+          formData.append('photo', photoFile);
+          await api.post(`/teachers/${teacherId}/photo`, formData, {
+            headers: { 'Content-Type': 'multipart/form-data' },
+          });
+        } catch {
+          // photo upload failed (e.g. Cloudinary not configured) — teacher still created
+        }
       }
 
-      router.push('/dashboard/teachers');
+      router.push('/dashboard/teachers?created=1');
     } catch (err: unknown) {
       const msgRaw = (err as { response?: { data?: { message?: string | string[] } } })?.response?.data?.message;
       const message = Array.isArray(msgRaw) ? msgRaw.join(', ') : msgRaw || 'Failed to create teacher';

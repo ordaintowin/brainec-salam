@@ -57,30 +57,21 @@ export default function AttendancePage() {
     setLoading(true);
     setError('');
     try {
-      // Fetch students in class
-      const classRes = await api.get(`/classes/${selectedClassId}`);
-      const classStudents = classRes.data?.students || [];
-
-      // Fetch existing attendance for date
-      let existing: Record<string, { status: string; notes: string }> = {};
-      try {
-        const attRes = await api.get(`/attendance`, { params: { classId: selectedClassId, date: selectedDate } });
-        const records: { studentId: string; status: string; notes?: string }[] = attRes.data?.records || attRes.data || [];
-        records.forEach((r) => {
-          existing[r.studentId] = { status: r.status, notes: r.notes || '' };
-        });
-      } catch {
-        // no existing records
-      }
+      // Fetch class attendance (students + existing records for the date) in one call
+      const attRes = await api.get(`/attendance`, { params: { classId: selectedClassId, date: selectedDate } });
+      const attRecords: Array<{
+        student: { id: string; studentId: string; firstName: string; lastName: string };
+        attendance: { status: string; notes?: string } | null;
+      }> = Array.isArray(attRes.data) ? attRes.data : [];
 
       setStudents(
-        classStudents.map((s: { id: string; studentId: string; firstName: string; lastName: string }) => ({
-          id: s.id,
-          studentId: s.studentId,
-          firstName: s.firstName,
-          lastName: s.lastName,
-          status: (existing[s.id]?.status as 'PRESENT' | 'ABSENT' | 'LATE') || 'PRESENT',
-          notes: existing[s.id]?.notes || '',
+        attRecords.map(r => ({
+          id: r.student.id,
+          studentId: r.student.studentId,
+          firstName: r.student.firstName,
+          lastName: r.student.lastName,
+          status: (r.attendance?.status as 'PRESENT' | 'ABSENT' | 'LATE') || 'PRESENT',
+          notes: r.attendance?.notes || '',
         }))
       );
     } catch {
@@ -108,7 +99,7 @@ export default function AttendancePage() {
     setSaving(true);
     setError('');
     try {
-      await api.post('/attendance', {
+      await api.post('/attendance/bulk', {
         classId: selectedClassId,
         date: selectedDate,
         records: students.map(s => ({

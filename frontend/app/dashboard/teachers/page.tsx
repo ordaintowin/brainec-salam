@@ -1,6 +1,6 @@
 'use client';
 import { useEffect, useState, useCallback } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { Plus, Eye, Pencil } from 'lucide-react';
 import api from '@/lib/api';
 import { useAuth } from '@/lib/auth';
@@ -21,12 +21,14 @@ interface Teacher {
 
 export default function TeachersPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { user } = useAuth();
   const [teachers, setTeachers] = useState<Teacher[]>([]);
   const [search, setSearch] = useState('');
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const [loading, setLoading] = useState(true);
+  const [successMessage, setSuccessMessage] = useState(searchParams.get('created') === '1' ? 'Teacher created successfully!' : '');
 
   const fetchTeachers = useCallback(async () => {
     setLoading(true);
@@ -37,8 +39,8 @@ export default function TeachersPage() {
         setTeachers(data);
         setTotalPages(1);
       } else {
-        setTeachers(Array.isArray(data.teachers) ? data.teachers : []);
-        setTotalPages(data.totalPages || 1);
+        setTeachers(Array.isArray(data.data) ? data.data : []);
+        setTotalPages(data.meta?.totalPages || 1);
       }
     } catch {
       setTeachers([]);
@@ -127,6 +129,13 @@ export default function TeachersPage() {
       <div className="mb-4 max-w-sm">
         <LiveSearch value={search} onChange={setSearch} placeholder="Search teachers…" />
       </div>
+
+      {successMessage && (
+        <div className="mb-4 p-3 bg-green-50 border border-green-200 text-green-700 rounded-lg text-sm flex items-center justify-between">
+          {successMessage}
+          <button onClick={() => setSuccessMessage('')} className="ml-2 text-green-500 hover:text-green-700">✕</button>
+        </div>
+      )}
 
       {loading ? (
         <div className="space-y-3">

@@ -193,6 +193,61 @@ export class TeachersService {
     });
   }
 
+  async findAllArchived(page = 1, limit = 20) {
+    const skip = (page - 1) * limit;
+    const [data, total] = await Promise.all([
+      this.prisma.teacher.findMany({
+        where: { isArchived: true },
+        skip,
+        take: limit,
+        orderBy: { archivedAt: 'desc' },
+        include: {
+          user: {
+            select: {
+              id: true,
+              name: true,
+              email: true,
+              role: true,
+              photoUrl: true,
+            },
+          },
+          class: { select: { id: true, name: true } },
+        },
+      }),
+      this.prisma.teacher.count({ where: { isArchived: true } }),
+    ]);
+    return {
+      data,
+      meta: { total, page, limit, totalPages: Math.ceil(total / limit) },
+    };
+  }
+
+  async restore(id: string) {
+    const teacher = await this.prisma.teacher.findUnique({ where: { id } });
+    if (!teacher) throw new NotFoundException('Teacher not found');
+    return this.prisma.teacher.update({
+      where: { id },
+      data: {
+        isArchived: false,
+        archivedAt: null,
+        archivedBy: null,
+        archiveReason: null,
+      },
+      include: {
+        user: {
+          select: {
+            id: true,
+            name: true,
+            email: true,
+            role: true,
+            photoUrl: true,
+          },
+        },
+        class: { select: { id: true, name: true } },
+      },
+    });
+  }
+
   async uploadPhoto(id: string, file: Express.Multer.File) {
     const teacher = await this.findOne(id);
     const result = await this.cloudinary.uploadBuffer(file.buffer, 'teachers');

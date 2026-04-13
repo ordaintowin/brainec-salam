@@ -24,8 +24,7 @@ interface FeeOrder {
 
 interface Invoice {
   id: string;
-  invoiceNumber?: string;
-  student?: { firstName: string; lastName: string; studentId: string };
+  student?: { id: string; firstName: string; lastName: string; studentId: string };
   feeOrder?: { title: string };
   amountDue: number;
   amountPaid: number;
@@ -36,20 +35,20 @@ interface Invoice {
 
 interface Payment {
   id: string;
-  createdAt: string;
+  paidAt: string;
   amount: number;
   method: string;
   reference?: string;
   paidBy: string;
-  invoice?: { invoiceNumber: string; student?: { firstName: string; lastName: string } };
+  student?: { firstName: string; lastName: string };
+  invoice?: { id: string; feeOrder?: { title: string } };
 }
 
 interface FinanceSummary {
-  totalInvoiced: number;
   totalCollected: number;
   totalOutstanding: number;
-  statusBreakdown: { status: string; count: number; amount: number }[];
-  classBreakdown?: { className: string; total: number; paid: number; outstanding: number }[];
+  totalOverdue: number;
+  perClassBreakdown: { classId: string; className: string; collected: number; outstanding: number }[];
 }
 
 const feeOrderSchema = z.object({
@@ -77,8 +76,8 @@ export default function FinancePage() {
   const [loading, setLoading] = useState(true);
   const [showFeeOrderModal, setShowFeeOrderModal] = useState(false);
   const [feeOrderError, setFeeOrderError] = useState('');
-  const [paymentModal, setPaymentModal] = useState<{ open: boolean; invoiceId: string; balance: number }>({
-    open: false, invoiceId: '', balance: 0,
+  const [paymentModal, setPaymentModal] = useState<{ open: boolean; invoiceId: string; studentId: string; balance: number }>({
+    open: false, invoiceId: '', studentId: '', balance: 0,
   });
 
   const {
@@ -110,7 +109,7 @@ export default function FinancePage() {
 
   const fetchInvoices = useCallback(async () => {
     try {
-      const res = await api.get('/finance/invoices', { params: { search, page: invoicePage, limit: 20 } });
+      const res = await api.get('/finance/invoices', { params: { q: search, page: invoicePage, limit: 20 } });
       setInvoices(res.data?.data || res.data || []);
       setInvoiceTotalPages(res.data?.meta?.totalPages || 1);
     } catch {
@@ -281,7 +280,7 @@ export default function FinancePage() {
                 ) : (
                   invoices.map(inv => (
                     <tr key={inv.id} className="hover:bg-gray-50">
-                      <td className="px-4 py-3 font-mono text-xs">{inv.invoiceNumber}</td>
+                      <td className="px-4 py-3 font-mono text-xs">INV-{inv.id.slice(-6).toUpperCase()}</td>
                       <td className="px-4 py-3">
                         {inv.student ? `${inv.student.firstName} ${inv.student.lastName}` : '—'}
                         {inv.student?.studentId && <span className="block text-xs text-gray-400">{inv.student.studentId}</span>}
@@ -296,7 +295,7 @@ export default function FinancePage() {
                         <td className="px-4 py-3">
                           {inv.balance > 0 && (
                             <button
-                              onClick={() => setPaymentModal({ open: true, invoiceId: inv.id, balance: inv.balance })}
+                              onClick={() => setPaymentModal({ open: true, invoiceId: inv.id, studentId: inv.student?.id ?? '', balance: inv.balance })}
                               className="text-xs bg-[#16a34a] hover:bg-green-700 text-white px-3 py-1 rounded-md"
                             >
                               Record Payment
@@ -345,10 +344,10 @@ export default function FinancePage() {
               ) : (
                 payments.map(p => (
                   <tr key={p.id} className="hover:bg-gray-50">
-                    <td className="px-4 py-3 text-gray-500">{formatDate(p.createdAt)}</td>
-                    <td className="px-4 py-3 font-mono text-xs">{p.invoice?.invoiceNumber || '—'}</td>
+                    <td className="px-4 py-3 text-gray-500">{formatDate(p.paidAt)}</td>
+                    <td className="px-4 py-3 font-mono text-xs">{p.invoice?.id ? `INV-${p.invoice.id.slice(-6).toUpperCase()}` : '—'}</td>
                     <td className="px-4 py-3">
-                      {p.invoice?.student ? `${p.invoice.student.firstName} ${p.invoice.student.lastName}` : '—'}
+                      {p.student ? `${p.student.firstName} ${p.student.lastName}` : '—'}
                     </td>
                     <td className="px-4 py-3 font-medium text-green-700">{formatCurrency(p.amount)}</td>
                     <td className="px-4 py-3 text-gray-600 capitalize">{p.method.replace('_', ' ').toLowerCase()}</td>
@@ -369,10 +368,6 @@ export default function FinancePage() {
             <>
               <div className="grid grid-cols-3 gap-4">
                 <div className="bg-white rounded-xl border border-gray-200 p-5">
-                  <p className="text-xs text-gray-400 uppercase tracking-wider">Total Invoiced</p>
-                  <p className="text-2xl font-bold text-gray-900 mt-1">{formatCurrency(summary.totalInvoiced)}</p>
-                </div>
-                <div className="bg-white rounded-xl border border-gray-200 p-5">
                   <p className="text-xs text-gray-400 uppercase tracking-wider">Total Collected</p>
                   <p className="text-2xl font-bold text-green-600 mt-1">{formatCurrency(summary.totalCollected)}</p>
                 </div>
@@ -380,32 +375,14 @@ export default function FinancePage() {
                   <p className="text-xs text-gray-400 uppercase tracking-wider">Outstanding</p>
                   <p className="text-2xl font-bold text-red-600 mt-1">{formatCurrency(summary.totalOutstanding)}</p>
                 </div>
-              </div>
-
-              {/* Status Breakdown */}
-              <div className="bg-white rounded-xl border border-gray-200 p-6">
-                <h3 className="text-sm font-semibold text-gray-800 mb-4">Status Breakdown</h3>
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                  {summary.statusBreakdown?.map(row => {
-                    const colors: Record<string, string> = {
-                      PAID: 'text-green-700 bg-green-50',
-                      PARTIAL: 'text-yellow-700 bg-yellow-50',
-                      PENDING: 'text-gray-600 bg-gray-50',
-                      OVERDUE: 'text-red-700 bg-red-50',
-                    };
-                    return (
-                      <div key={row.status} className={`rounded-lg p-3 text-center ${colors[row.status] || 'bg-gray-50'}`}>
-                        <p className="text-lg font-bold">{row.count}</p>
-                        <p className="text-xs capitalize">{row.status.toLowerCase()}</p>
-                        <p className="text-xs font-medium mt-0.5">{formatCurrency(row.amount)}</p>
-                      </div>
-                    );
-                  })}
+                <div className="bg-white rounded-xl border border-gray-200 p-5">
+                  <p className="text-xs text-gray-400 uppercase tracking-wider">Overdue</p>
+                  <p className="text-2xl font-bold text-orange-600 mt-1">{formatCurrency(summary.totalOverdue)}</p>
                 </div>
               </div>
 
-              {/* Class Breakdown */}
-              {summary.classBreakdown && summary.classBreakdown.length > 0 && (
+              {/* Per-Class Breakdown */}
+              {summary.perClassBreakdown && summary.perClassBreakdown.length > 0 && (
                 <div className="bg-white rounded-xl border border-gray-200 p-6">
                   <h3 className="text-sm font-semibold text-gray-800 mb-4">Per-Class Breakdown</h3>
                   <div className="overflow-x-auto">
@@ -413,17 +390,15 @@ export default function FinancePage() {
                       <thead>
                         <tr className="bg-gray-50 border-b">
                           <th className="text-left px-4 py-2.5 text-xs text-gray-400 font-medium">Class</th>
-                          <th className="text-left px-4 py-2.5 text-xs text-gray-400 font-medium">Total</th>
-                          <th className="text-left px-4 py-2.5 text-xs text-gray-400 font-medium">Paid</th>
+                          <th className="text-left px-4 py-2.5 text-xs text-gray-400 font-medium">Collected</th>
                           <th className="text-left px-4 py-2.5 text-xs text-gray-400 font-medium">Outstanding</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-gray-100">
-                        {summary.classBreakdown.map((row, idx) => (
-                          <tr key={idx} className="hover:bg-gray-50">
+                        {summary.perClassBreakdown.map((row) => (
+                          <tr key={row.classId} className="hover:bg-gray-50">
                             <td className="px-4 py-3 font-medium text-gray-800">{row.className}</td>
-                            <td className="px-4 py-3">{formatCurrency(row.total)}</td>
-                            <td className="px-4 py-3 text-green-700">{formatCurrency(row.paid)}</td>
+                            <td className="px-4 py-3 text-green-700">{formatCurrency(row.collected)}</td>
                             <td className="px-4 py-3 text-red-600">{formatCurrency(row.outstanding)}</td>
                           </tr>
                         ))}
@@ -492,8 +467,9 @@ export default function FinancePage() {
 
       <RecordPaymentModal
         isOpen={paymentModal.open}
-        onClose={() => setPaymentModal({ open: false, invoiceId: '', balance: 0 })}
+        onClose={() => setPaymentModal({ open: false, invoiceId: '', studentId: '', balance: 0 })}
         invoiceId={paymentModal.invoiceId}
+        studentId={paymentModal.studentId}
         balance={paymentModal.balance}
         onSuccess={fetchInvoices}
       />
