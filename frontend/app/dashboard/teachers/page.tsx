@@ -1,7 +1,10 @@
 'use client';
 import { useEffect, useState, useCallback } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { Plus, Eye, Pencil, Trash2, Download } from 'lucide-react';
+import { Plus, Eye, EyeOff, Pencil, Trash2, Download, KeyRound, X, Loader2 } from 'lucide-react';
+import { useForm } from 'react-hook-form';
+import { zodResolver } from '@hookform/resolvers/zod';
+import { z } from 'zod';
 import api from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import DataTable from '@/components/DataTable';
@@ -21,6 +24,11 @@ interface Teacher {
   joinDate?: string;
 }
 
+const resetSchema = z.object({
+  password: z.string().min(6, 'Password must be at least 6 characters'),
+});
+type ResetFormData = z.infer<typeof resetSchema>;
+
 export default function TeachersPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -34,6 +42,16 @@ export default function TeachersPage() {
   const [archiveModal, setArchiveModal] = useState<{ open: boolean; teacher: Teacher | null }>({ open: false, teacher: null });
   const [archiveReason, setArchiveReason] = useState('');
   const [archiveLoading, setArchiveLoading] = useState(false);
+  const [resetModal, setResetModal] = useState<{ open: boolean; teacher: Teacher | null }>({ open: false, teacher: null });
+  const [resetError, setResetError] = useState('');
+  const [showResetPwd, setShowResetPwd] = useState(false);
+
+  const {
+    register: registerReset,
+    handleSubmit: handleResetSubmit,
+    reset: resetResetForm,
+    formState: { errors: resetErrors, isSubmitting: resetSubmitting },
+  } = useForm<ResetFormData>({ resolver: zodResolver(resetSchema) });
 
   const fetchTeachers = useCallback(async () => {
     setLoading(true);
@@ -101,6 +119,21 @@ export default function TeachersPage() {
     }
   };
 
+  const onResetSubmit = async (data: ResetFormData) => {
+    if (!resetModal.teacher) return;
+    setResetError('');
+    try {
+      await api.patch(`/teachers/${resetModal.teacher.id}`, { password: data.password });
+      const teacherName = resetModal.teacher.user.name;
+      setResetModal({ open: false, teacher: null });
+      resetResetForm();
+      setSuccessMessage(`Password updated for ${teacherName}.`);
+    } catch (err: unknown) {
+      const message = (err as { response?: { data?: { message?: string } } })?.response?.data?.message || 'Failed to update password';
+      setResetError(message);
+    }
+  };
+
   const columns = [
     {
       header: 'Teacher',
@@ -131,6 +164,15 @@ export default function TeachersPage() {
       header: 'Actions',
       cell: (row: Teacher) => (
         <div className="flex items-center gap-2">
+          {canManage && (
+            <button
+              onClick={() => { setResetModal({ open: true, teacher: row }); setResetError(''); resetResetForm(); setShowResetPwd(false); }}
+              className="p-1.5 text-gray-500 hover:text-blue-600 hover:bg-blue-50 rounded"
+              title="Reset password"
+            >
+              <KeyRound className="w-4 h-4" />
+            </button>
+          )}
           <button
             onClick={() => router.push(`/dashboard/teachers/${row.id}`)}
             className="p-1.5 text-blue-600 hover:bg-blue-50 rounded"
@@ -224,6 +266,45 @@ export default function TeachersPage() {
         onReasonChange={setArchiveReason}
         isLoading={archiveLoading}
       />
+
+      {/* Reset Password Modal */}
+      {resetModal.open && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <div className="absolute inset-0 bg-black/50" onClick={() => setResetModal({ open: false, teacher: null })} />
+          <div className="relative bg-white rounded-xl shadow-xl p-6 w-full max-w-sm mx-4">
+            <div className="flex items-center justify-between mb-5">
+              <h2 className="text-lg font-semibold text-gray-900">Reset Password</h2>
+              <button onClick={() => setResetModal({ open: false, teacher: null })} className="text-gray-400 hover:text-gray-600"><X className="w-5 h-5" /></button>
+            </div>
+            <p className="text-sm text-gray-500 mb-4">Set a new password for <span className="font-medium text-gray-800">{resetModal.teacher?.user.name}</span>.</p>
+            {resetError && <div className="mb-4 p-3 bg-red-50 border border-red-200 text-red-700 rounded-lg text-sm">{resetError}</div>}
+            <form onSubmit={handleResetSubmit(onResetSubmit)} className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">New Password *</label>
+                <div className="relative">
+                  <input
+                    type={showResetPwd ? 'text' : 'password'}
+                    {...registerReset('password')}
+                    className="w-full px-3 py-2 pr-10 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#16a34a]"
+                    placeholder="Min 6 characters"
+                  />
+                  <button type="button" onClick={() => setShowResetPwd(p => !p)} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
+                    {showResetPwd ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
+                </div>
+                {resetErrors.password && <p className="text-red-500 text-xs mt-1">{resetErrors.password.message}</p>}
+              </div>
+              <div className="flex gap-3 justify-end">
+                <button type="button" onClick={() => setResetModal({ open: false, teacher: null })} className="px-4 py-2 text-sm text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50">Cancel</button>
+                <button type="submit" disabled={resetSubmitting} className="px-4 py-2 text-sm text-white bg-[#16a34a] hover:bg-green-700 rounded-lg disabled:opacity-60 flex items-center gap-2">
+                  {resetSubmitting && <Loader2 className="w-4 h-4 animate-spin" />}
+                  Save Password
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
