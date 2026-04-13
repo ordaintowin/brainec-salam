@@ -94,12 +94,27 @@ export default function FeeOrderDetailPage() {
     { key: 'owing' as const, label: `Owing (${owingStudents.length})` },
   ];
 
-  const PAID_STATUS = 'PAID' as const;
-  const OWING_STATUS = 'PARTIAL' as const;
+  interface DisplayStudent {
+    studentId: string;
+    name: string;
+    className: string;
+    amountDue: number;
+    amountPaid: number;
+    balance: number;
+    status: string;
+  }
 
-  const displayStudents = activeTab === 'paid' ? paidStudents
-    : activeTab === 'owing' ? owingStudents
-    : [...paidStudents.map(s => ({ ...s, balance: 0, status: PAID_STATUS })), ...owingStudents.map(s => ({ ...s, status: OWING_STATUS }))];
+  let displayStudents: DisplayStudent[];
+  if (activeTab === 'paid') {
+    displayStudents = paidStudents.map(s => ({ ...s, balance: 0, status: 'PAID' }));
+  } else if (activeTab === 'owing') {
+    displayStudents = owingStudents.map(s => ({ ...s, status: 'PARTIAL' }));
+  } else {
+    displayStudents = [
+      ...paidStudents.map(s => ({ ...s, balance: 0, status: 'PAID' })),
+      ...owingStudents.map(s => ({ ...s, status: 'PARTIAL' })),
+    ];
+  }
 
   return (
     <div className="p-8">
@@ -223,11 +238,11 @@ export default function FeeOrderDetailPage() {
                   <td className="px-4 py-3">{formatCurrency(s.amountDue)}</td>
                   <td className="px-4 py-3 text-green-700">{formatCurrency(s.amountPaid)}</td>
                   {activeTab !== 'paid' && (
-                    <td className="px-4 py-3 text-red-600">{formatCurrency('balance' in s ? s.balance : 0)}</td>
+                    <td className="px-4 py-3 text-red-600">{formatCurrency(s.balance)}</td>
                   )}
                   {activeTab === 'all' && (
                     <td className="px-4 py-3">
-                      <PaymentStatusBadge status={'status' in s ? (s as { status: string }).status : 'PENDING'} />
+                      <PaymentStatusBadge status={s.status} />
                     </td>
                   )}
                 </tr>

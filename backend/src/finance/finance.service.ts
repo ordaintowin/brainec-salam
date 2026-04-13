@@ -240,6 +240,11 @@ export class FinanceService {
     return excess > 0 ? excess : 0;
   }
 
+  /** Whether the invoice should be treated as fully paid (status PAID, or zero balance with partial payment) */
+  private isEffectivelyPaid(status: string, balance: number, amountPaid: number): boolean {
+    return status === PaymentStatus.PAID || (balance <= 0 && amountPaid > 0);
+  }
+
   async getPayments(page = 1, limit = 10) {
     const skip = (page - 1) * limit;
     const [data, total] = await Promise.all([
@@ -336,7 +341,7 @@ export class FinanceService {
         className: inv.student.class?.name || '—',
       };
 
-      if (inv.status === PaymentStatus.PAID || (bal <= 0 && paid > 0)) {
+      if (this.isEffectivelyPaid(inv.status, bal, paid)) {
         paidStudents.push({ ...studentInfo, amountPaid: paid, amountDue: due });
       } else if (bal > 0) {
         owingStudents.push({
@@ -474,7 +479,7 @@ export class FinanceService {
           className: inv.student.class?.name || '—',
         };
 
-        if (inv.status === PaymentStatus.PAID || (bal <= 0 && paid > 0)) {
+        if (this.isEffectivelyPaid(inv.status, bal, paid)) {
           foEntry.paidStudents.push({ ...studentInfo, amountPaid: paid });
         } else if (bal > 0) {
           foEntry.owingStudents.push({ ...studentInfo, balance: bal });
