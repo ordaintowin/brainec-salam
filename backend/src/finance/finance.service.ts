@@ -336,7 +336,7 @@ export class FinanceService {
         className: inv.student.class?.name || '—',
       };
 
-      if (inv.status === PaymentStatus.PAID) {
+      if (inv.status === PaymentStatus.PAID || (bal <= 0 && paid > 0)) {
         paidStudents.push({ ...studentInfo, amountPaid: paid, amountDue: due });
       } else if (bal > 0) {
         owingStudents.push({
@@ -474,7 +474,7 @@ export class FinanceService {
           className: inv.student.class?.name || '—',
         };
 
-        if (inv.status === PaymentStatus.PAID) {
+        if (inv.status === PaymentStatus.PAID || (bal <= 0 && paid > 0)) {
           foEntry.paidStudents.push({ ...studentInfo, amountPaid: paid });
         } else if (bal > 0) {
           foEntry.owingStudents.push({ ...studentInfo, balance: bal });

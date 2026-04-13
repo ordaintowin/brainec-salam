@@ -94,9 +94,12 @@ export default function FeeOrderDetailPage() {
     { key: 'owing' as const, label: `Owing (${owingStudents.length})` },
   ];
 
+  const PAID_STATUS = 'PAID' as const;
+  const OWING_STATUS = 'PARTIAL' as const;
+
   const displayStudents = activeTab === 'paid' ? paidStudents
     : activeTab === 'owing' ? owingStudents
-    : [...paidStudents.map(s => ({ ...s, balance: 0, status: 'PAID' })), ...owingStudents.map(s => ({ ...s, status: 'OWING' }))];
+    : [...paidStudents.map(s => ({ ...s, balance: 0, status: PAID_STATUS })), ...owingStudents.map(s => ({ ...s, status: OWING_STATUS }))];
 
   return (
     <div className="p-8">
