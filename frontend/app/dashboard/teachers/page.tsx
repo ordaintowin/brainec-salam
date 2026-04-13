@@ -274,7 +274,7 @@ export default function TeachersPage() {
           <div className="relative bg-white rounded-xl shadow-xl p-6 w-full max-w-sm mx-4">
             <div className="flex items-center justify-between mb-5">
               <h2 className="text-lg font-semibold text-gray-900">Reset Password</h2>
-              <button onClick={() => setResetModal({ open: false, teacher: null })} className="text-gray-400 hover:text-gray-600"><X className="w-5 h-5" /></button>
+              <button onClick={() => setResetModal({ open: false, teacher: null })} className="text-gray-400 hover:text-gray-600" aria-label="Close"><X className="w-5 h-5" /></button>
             </div>
             <p className="text-sm text-gray-500 mb-4">Set a new password for <span className="font-medium text-gray-800">{resetModal.teacher?.user.name}</span>.</p>
             {resetError && <div className="mb-4 p-3 bg-red-50 border border-red-200 text-red-700 rounded-lg text-sm">{resetError}</div>}
@@ -288,7 +288,7 @@ export default function TeachersPage() {
                     className="w-full px-3 py-2 pr-10 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#16a34a]"
                     placeholder="Min 6 characters"
                   />
-                  <button type="button" onClick={() => setShowResetPwd(p => !p)} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
+                  <button type="button" onClick={() => setShowResetPwd(p => !p)} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600" aria-label="Toggle password visibility">
                     {showResetPwd ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                   </button>
                 </div>
