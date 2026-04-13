@@ -324,7 +324,7 @@ export default function FinancePage() {
                             {fo.class ? 'Class' : 'Individual'}
                           </span>
                         </td>
-                        <td className="px-4 py-3 text-gray-600">{fo.class?.name || 'All Students'}</td>
+                        <td className="px-4 py-3 text-gray-600">{fo.class?.name || '—'}</td>
                         <td className="px-4 py-3 text-gray-600">{formatDate(fo.dueDate)}</td>
                         <td className="px-4 py-3 text-gray-600">{fo._count?.invoices ?? 0}</td>
                       </tr>
