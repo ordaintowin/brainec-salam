@@ -115,7 +115,7 @@ export class FinanceService {
     });
     if (!student) throw new NotFoundException('Student not found');
 
-    return this.prisma.feeInvoice.findMany({
+    const invoices = await this.prisma.feeInvoice.findMany({
       where: { studentId },
       orderBy: { createdAt: 'desc' },
       include: {
@@ -123,6 +123,14 @@ export class FinanceService {
         payments: { orderBy: { paidAt: 'desc' } },
       },
     });
+
+    return invoices.map((inv) => ({
+      ...inv,
+      creditBalance: this.computeCreditBalance(
+        Number(inv.amountPaid),
+        Number(inv.amountDue),
+      ),
+    }));
   }
 
   async recordPayment(dto: RecordPaymentDto, recordedById: string) {
@@ -224,6 +232,12 @@ export class FinanceService {
     }
 
     return { ...payment, creditCarriedForward: creditAmount };
+  }
+
+  /** Compute how much overpayment credit a student has on a specific invoice */
+  private computeCreditBalance(amountPaid: number, amountDue: number): number {
+    const excess = amountPaid - amountDue;
+    return excess > 0 ? excess : 0;
   }
 
   async getPayments(page = 1, limit = 10) {

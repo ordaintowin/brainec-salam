@@ -345,13 +345,15 @@ export default function FinancePage() {
                                 Record Payment
                               </button>
                             )}
-                            <button
-                              onClick={() => setPrintModal({ open: true, invoice: inv })}
-                              className="p-1.5 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded"
-                              title="Print invoice"
-                            >
-                              <Printer className="w-4 h-4" />
-                            </button>
+                            {inv.status !== 'PENDING' && Number(inv.amountPaid) > 0 && (
+                              <button
+                                onClick={() => setPrintModal({ open: true, invoice: inv })}
+                                className="p-1.5 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded"
+                                title="Print invoice"
+                              >
+                                <Printer className="w-4 h-4" />
+                              </button>
+                            )}
                           </div>
                         </td>
                       )}

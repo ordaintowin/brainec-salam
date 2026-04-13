@@ -27,6 +27,7 @@ interface Invoice {
   dueDate: string;
   feeOrder?: FeeOrder;
   payments?: Payment[];
+  creditBalance?: number;
   student?: {
     studentId: string;
     firstName: string;
@@ -190,6 +191,12 @@ export default function PrintInvoiceModal({ isOpen, onClose, invoice, payment }:
                     <span className="amount-label">Remaining Balance</span>
                     <span className="amount-value">{formatCurrency(invoice.balance)}</span>
                   </div>
+                  {invoice.creditBalance != null && invoice.creditBalance > 0 && (
+                    <div className="amount-row">
+                      <span className="amount-label">Credit Balance</span>
+                      <span className="amount-value" style={{ color: '#16a34a' }}>{formatCurrency(invoice.creditBalance)}</span>
+                    </div>
+                  )}
                   <div className="amount-row">
                     <span className="amount-label">Invoice Status</span>
                     <span className={`amount-value ${statusClass(invoice.status)}`}>{invoice.status}</span>
@@ -203,6 +210,12 @@ export default function PrintInvoiceModal({ isOpen, onClose, invoice, payment }:
                     <span className="amount-label">Balance</span>
                     <span className="amount-value">{formatCurrency(invoice.balance)}</span>
                   </div>
+                  {invoice.creditBalance != null && invoice.creditBalance > 0 && (
+                    <div className="amount-row">
+                      <span className="amount-label">Credit Balance (Overpayment)</span>
+                      <span className="amount-value" style={{ color: '#16a34a' }}>{formatCurrency(invoice.creditBalance)}</span>
+                    </div>
+                  )}
                   <div className="amount-row">
                     <span className="amount-label">Status</span>
                     <span className={`amount-value ${statusClass(invoice.status)}`}>{invoice.status}</span>

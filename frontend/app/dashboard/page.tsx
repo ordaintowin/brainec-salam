@@ -19,7 +19,7 @@ interface DashboardStats {
 interface ActivityLog {
   id: string;
   createdAt: string;
-  admin?: { name: string };
+  user?: { name: string };
   action: string;
   description: string;
 }
@@ -50,7 +50,7 @@ export default function DashboardPage() {
           api.get('/logs?limit=10'),
         ]);
         setStats(statsRes.data);
-        setLogs(logsRes.data?.logs || logsRes.data || []);
+        setLogs(Array.isArray(logsRes.data?.data) ? logsRes.data.data : Array.isArray(logsRes.data) ? logsRes.data : []);
       }
     } catch {
       // silently fail
@@ -176,7 +176,7 @@ export default function DashboardPage() {
                 {logs.map(log => (
                   <tr key={log.id} className="hover:bg-gray-50">
                     <td className="py-2.5 px-3 text-gray-400 whitespace-nowrap text-xs">{formatDateTime(log.createdAt)}</td>
-                    <td className="py-2.5 px-3 font-medium text-gray-700">{log.admin?.name || '—'}</td>
+                    <td className="py-2.5 px-3 font-medium text-gray-700">{log.user?.name || '—'}</td>
                     <td className="py-2.5 px-3">
                       <span className="px-2 py-0.5 bg-blue-50 text-blue-700 rounded text-xs font-medium">{log.action}</span>
                     </td>
