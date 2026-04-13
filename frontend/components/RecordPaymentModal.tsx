@@ -7,7 +7,8 @@ import { X, Loader2 } from 'lucide-react';
 import api from '@/lib/api';
 
 const schema = z.object({
-  amount: z.string().min(1, 'Amount is required').refine(v => !isNaN(parseFloat(v)) && parseFloat(v) > 0, 'Must be positive'),  method: z.enum(['CASH', 'BANK_TRANSFER', 'MOBILE_MONEY']),
+  amount: z.string().min(1, 'Amount is required').refine(v => !isNaN(parseFloat(v)) && parseFloat(v) > 0, 'Must be positive'),
+  method: z.enum(['CASH', 'BANK_TRANSFER', 'MOBILE_MONEY']),
   reference: z.string().optional(),
   paidBy: z.string().min(1, 'Paid by is required'),
   notes: z.string().optional(),

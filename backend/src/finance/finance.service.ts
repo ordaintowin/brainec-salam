@@ -186,34 +186,40 @@ export class FinanceService {
       });
 
       if (nextInvoice) {
-        const nextPaid = Number(nextInvoice.amountPaid) + creditAmount;
         const nextDue = Number(nextInvoice.amountDue);
-        const nextBalance = Math.max(0, nextDue - nextPaid);
-        const nextStatus: PaymentStatus =
-          nextBalance <= 0 ? PaymentStatus.PAID : nextPaid > 0 ? PaymentStatus.PARTIAL : PaymentStatus.PENDING;
+        const nextAlreadyPaid = Number(nextInvoice.amountPaid);
+        const nextRemaining = Math.max(0, nextDue - nextAlreadyPaid);
+        // Only apply credit up to what is actually owed on the next invoice
+        const appliedCredit = Math.min(creditAmount, nextRemaining);
+        if (appliedCredit > 0) {
+          const nextPaid = nextAlreadyPaid + appliedCredit;
+          const nextBalance = Math.max(0, nextDue - nextPaid);
+          const nextStatus: PaymentStatus =
+            nextBalance <= 0 ? PaymentStatus.PAID : nextPaid > 0 ? PaymentStatus.PARTIAL : PaymentStatus.PENDING;
 
-        await this.prisma.$transaction([
-          this.prisma.payment.create({
-            data: {
-              studentId: dto.studentId,
-              invoiceId: nextInvoice.id,
-              amount: Math.min(creditAmount, nextDue - Number(nextInvoice.amountPaid)),
-              method: dto.method,
-              reference: dto.reference,
-              paidBy: dto.paidBy,
-              recordedBy: recordedById,
-              notes: `Credit carried forward from invoice ${dto.invoiceId}`,
-            },
-          }),
-          this.prisma.feeInvoice.update({
-            where: { id: nextInvoice.id },
-            data: {
-              amountPaid: nextPaid > nextDue ? nextDue : nextPaid,
-              balance: nextBalance,
-              status: nextStatus,
-            },
-          }),
-        ]);
+          await this.prisma.$transaction([
+            this.prisma.payment.create({
+              data: {
+                studentId: dto.studentId,
+                invoiceId: nextInvoice.id,
+                amount: appliedCredit,
+                method: dto.method,
+                reference: dto.reference,
+                paidBy: dto.paidBy,
+                recordedBy: recordedById,
+                notes: `Credit carried forward from invoice ${dto.invoiceId}`,
+              },
+            }),
+            this.prisma.feeInvoice.update({
+              where: { id: nextInvoice.id },
+              data: {
+                amountPaid: nextPaid,
+                balance: nextBalance,
+                status: nextStatus,
+              },
+            }),
+          ]);
+        }
       }
     }
 

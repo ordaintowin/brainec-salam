@@ -169,7 +169,8 @@ export default function StudentDetailPage() {
                     <th className="text-left px-4 py-3 text-xs text-gray-400 font-medium">Balance</th>
                     <th className="text-left px-4 py-3 text-xs text-gray-400 font-medium">Status</th>
                     <th className="text-left px-4 py-3 text-xs text-gray-400 font-medium">Due Date</th>
-                    {canManage && <th className="text-left px-4 py-3 text-xs text-gray-400 font-medium">Actions</th>}                  </tr>
+                    {canManage && <th className="text-left px-4 py-3 text-xs text-gray-400 font-medium">Actions</th>}
+                  </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100">
                   {invoices.map(inv => (
