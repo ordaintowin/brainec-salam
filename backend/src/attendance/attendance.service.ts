@@ -77,7 +77,7 @@ export class AttendanceService {
         status: dto.status,
         markedBy: markedById,
         notes: dto.notes,
-        termId: term?.id || null,
+        termId: term.id,
       },
       update: {
         status: dto.status,
