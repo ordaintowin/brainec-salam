@@ -127,6 +127,13 @@ function PaginationBar({
   );
 }
 
+/* ---------- Status color map (shared across renders) ---------- */
+const STATUS_COLOR_MAP: Record<string, string> = {
+  PRESENT: 'text-green-600',
+  ABSENT: 'text-red-600',
+  LATE: 'text-yellow-600',
+};
+
 /* ---------- Clickable count badge ---------- */
 function CountBadge({
   count,
@@ -493,12 +500,6 @@ export default function StudentDetailPage() {
   const renderDrillDown = () => {
     if (!drillDown) return null;
 
-    const statusColorMap: Record<string, string> = {
-      PRESENT: 'text-green-600',
-      ABSENT: 'text-red-600',
-      LATE: 'text-yellow-600',
-    };
-
     return (
       <div>
         {/* Drill-down header */}
@@ -515,7 +516,7 @@ export default function StudentDetailPage() {
             </h3>
             <p className="text-xs text-gray-500">
               Showing all{' '}
-              <span className={`font-semibold ${statusColorMap[drillDown.status] || 'text-gray-600'}`}>
+              <span className={`font-semibold ${STATUS_COLOR_MAP[drillDown.status] || 'text-gray-600'}`}>
                 {drillDown.status.toLowerCase()}
               </span>{' '}
               days — {detailMeta.total} record{detailMeta.total !== 1 ? 's' : ''}
