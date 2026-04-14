@@ -190,9 +190,12 @@ export class StudentsService {
     const student = await this.prisma.student.findUnique({ where: { id: studentId } });
     if (!student) throw new NotFoundException('Student not found');
 
-    // Get all terms ordered by most recent first
+    // Get all terms ordered by most recent first, with their TermDays
     const terms = await this.prisma.term.findMany({
       orderBy: { startDate: 'desc' },
+      include: {
+        termDays: { select: { isHoliday: true } },
+      },
     });
 
     // Get all attendance records for this student
@@ -211,13 +214,20 @@ export class StudentsService {
       else if (att.status === 'LATE') termCounts[tid].late++;
     }
 
-    const today = new Date();
-    today.setUTCHours(0, 0, 0, 0);
-
     const result = terms.map((term) => {
       const counts = termCounts[term.id] || { present: 0, absent: 0, late: 0 };
-      const endForCount = term.status === 'CLOSED' || term.endDate <= today ? term.endDate : today;
-      const totalSchoolDays = this.countWeekdays(term.startDate, endForCount);
+
+      // Use TermDay records if available, otherwise fall back to weekday calculation
+      let totalSchoolDays: number;
+      if (term.termDays && term.termDays.length > 0) {
+        totalSchoolDays = term.termDays.filter((d) => !d.isHoliday).length;
+      } else {
+        const today = new Date();
+        today.setUTCHours(0, 0, 0, 0);
+        const endForCount = term.status === 'CLOSED' || term.endDate <= today ? term.endDate : today;
+        totalSchoolDays = this.countWeekdays(term.startDate, endForCount);
+      }
+
       const totalMarked = counts.present + counts.absent + counts.late;
 
       return {

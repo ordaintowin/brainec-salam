@@ -59,6 +59,32 @@ export class AttendanceController {
     return this.attendanceService.getClassReport(classId, termId);
   }
 
+  @Get('closure-status')
+  getClosureStatus(
+    @Query('classId') classId: string,
+    @Query('date') date: string,
+  ) {
+    return this.attendanceService.getClosureStatus(classId, date);
+  }
+
+  @Get('unclosed/:classId')
+  getUnclosedPreviousDay(@Param('classId') classId: string) {
+    return this.attendanceService.getUnclosedPreviousDay(classId);
+  }
+
+  @Post('close-day')
+  closeDay(
+    @Body() body: { classId: string; date: string },
+    @CurrentUser() user: any,
+  ) {
+    return this.attendanceService.closeAttendanceForDay(
+      body.classId,
+      body.date,
+      user.id,
+      user.role,
+    );
+  }
+
   @Patch(':id')
   update(
     @Param('id') id: string,
