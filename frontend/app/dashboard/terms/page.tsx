@@ -506,6 +506,65 @@ export default function TermsPage() {
           </div>
         </div>
       )}
+
+      {/* Edit Term Modal */}
+      {editModal.open && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <div className="absolute inset-0 bg-black/50" onClick={() => setEditModal({ open: false, term: null })} />
+          <div className="relative bg-white rounded-xl shadow-xl p-6 w-full max-w-md mx-4">
+            <div className="flex items-center justify-between mb-5">
+              <h2 className="text-lg font-semibold text-gray-900">Edit Term</h2>
+              <button onClick={() => setEditModal({ open: false, term: null })} className="text-gray-400 hover:text-gray-600"><X className="w-5 h-5" /></button>
+            </div>
+
+            {editError && (
+              <div className="mb-4 p-3 bg-red-50 border border-red-200 text-red-700 rounded-lg text-sm">{editError}</div>
+            )}
+
+            <form onSubmit={handleEditSubmit(onEdit)} className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Term Name *</label>
+                <input
+                  {...registerEdit('name')}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#16a34a]"
+                />
+                {editErrors.name && <p className="text-red-500 text-xs mt-1">{editErrors.name.message}</p>}
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Start Date *</label>
+                  <input type="date" {...registerEdit('startDate')} className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#16a34a]" />
+                  {editErrors.startDate && <p className="text-red-500 text-xs mt-1">{editErrors.startDate.message}</p>}
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">End Date *</label>
+                  <input type="date" {...registerEdit('endDate')} className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#16a34a]" />
+                  {editErrors.endDate && <p className="text-red-500 text-xs mt-1">{editErrors.endDate.message}</p>}
+                </div>
+              </div>
+
+              <div className="flex gap-3 justify-end">
+                <button
+                  type="button"
+                  onClick={() => setEditModal({ open: false, term: null })}
+                  className="px-4 py-2 text-sm text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={editSubmitting}
+                  className="px-4 py-2 text-sm text-white bg-[#16a34a] hover:bg-green-700 rounded-lg disabled:opacity-60 flex items-center gap-2"
+                >
+                  {editSubmitting && <Loader2 className="w-4 h-4 animate-spin" />}
+                  Save Changes
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

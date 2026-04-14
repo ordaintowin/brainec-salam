@@ -104,15 +104,18 @@ export default function FeeOrderDetailPage() {
     status: string;
   }
 
+  const getOwingStatus = (s: StudentRow & { balance: number }) =>
+    s.amountPaid > 0 ? 'PARTIAL' : 'PENDING';
+
   let displayStudents: DisplayStudent[];
   if (activeTab === 'paid') {
     displayStudents = paidStudents.map(s => ({ ...s, balance: 0, status: 'PAID' }));
   } else if (activeTab === 'owing') {
-    displayStudents = owingStudents.map(s => ({ ...s, status: 'PARTIAL' }));
+    displayStudents = owingStudents.map(s => ({ ...s, status: getOwingStatus(s) }));
   } else {
     displayStudents = [
       ...paidStudents.map(s => ({ ...s, balance: 0, status: 'PAID' })),
-      ...owingStudents.map(s => ({ ...s, status: 'PARTIAL' })),
+      ...owingStudents.map(s => ({ ...s, status: getOwingStatus(s) })),
     ];
   }
 

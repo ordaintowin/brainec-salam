@@ -4,6 +4,7 @@ import {
   IsDateString,
   IsNumber,
   IsPositive,
+  IsArray,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 
@@ -26,6 +27,11 @@ export class CreateFeeOrderDto {
   @IsString()
   @IsOptional()
   classId?: string;
+
+  @IsArray()
+  @IsString({ each: true })
+  @IsOptional()
+  studentIds?: string[];
 }
 
 export class RecordPaymentDto {

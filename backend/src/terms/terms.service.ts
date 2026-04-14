@@ -140,6 +140,17 @@ export class TermsService {
       throw new BadRequestException('Term is already closed');
     }
 
+    // Prevent closing a term before its end date
+    const now = new Date();
+    now.setUTCHours(0, 0, 0, 0);
+    const endDate = new Date(term.endDate);
+    endDate.setUTCHours(0, 0, 0, 0);
+    if (endDate.getTime() > now.getTime()) {
+      throw new BadRequestException(
+        `Cannot close this term yet — the term end date (${endDate.toISOString().split('T')[0]}) has not passed`,
+      );
+    }
+
     return this.prisma.term.update({
       where: { id },
       data: {

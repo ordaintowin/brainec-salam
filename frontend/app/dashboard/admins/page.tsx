@@ -16,6 +16,7 @@ interface Admin {
   role: string;
   isActive: boolean;
   createdAt: string;
+  photoUrl?: string;
 }
 
 const createSchema = z.object({
@@ -170,7 +171,12 @@ export default function AdminsPage() {
                   <tr key={admin.id} className="hover:bg-gray-50">
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-3">
-                        <InitialsAvatar name={admin.name} size="sm" />
+                        {admin.photoUrl ? (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img src={admin.photoUrl} alt={admin.name} className="w-8 h-8 rounded-full object-cover" />
+                        ) : (
+                          <InitialsAvatar name={admin.name} size="sm" />
+                        )}
                         <span className="font-medium text-gray-800">{admin.name}</span>
                       </div>
                     </td>

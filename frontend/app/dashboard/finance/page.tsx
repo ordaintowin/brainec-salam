@@ -1,7 +1,7 @@
 'use client';
 import { useEffect, useState, useCallback } from 'react';
 import Link from 'next/link';
-import { Plus, X, Loader2, Download, Printer, ChevronRight } from 'lucide-react';
+import { Plus, X, Loader2, Download, Printer, ChevronRight, ChevronDown } from 'lucide-react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
@@ -77,6 +77,7 @@ const feeOrderSchema = z.object({
 
 type FeeOrderForm = z.infer<typeof feeOrderSchema>;
 interface ClassOption { id: string; name: string }
+interface StudentOption { id: string; studentId: string; firstName: string; lastName: string; class?: { name: string } }
 
 export default function FinancePage() {
   const { user } = useAuth();
@@ -99,6 +100,23 @@ export default function FinancePage() {
     open: false, invoiceId: '', studentId: '', balance: 0,
   });
   const [printModal, setPrintModal] = useState<{ open: boolean; invoice: Invoice | null }>({ open: false, invoice: null });
+  const [expandedFeeOrders, setExpandedFeeOrders] = useState<Set<string>>(new Set());
+  const [summaryPage, setSummaryPage] = useState(1);
+  const summaryPerPage = 5;
+  const [orderMode, setOrderMode] = useState<'class' | 'individual'>('class');
+  const [studentSearch, setStudentSearch] = useState('');
+  const [studentResults, setStudentResults] = useState<StudentOption[]>([]);
+  const [selectedStudents, setSelectedStudents] = useState<StudentOption[]>([]);
+  const [studentSearchLoading, setStudentSearchLoading] = useState(false);
+
+  const toggleFeeOrderExpanded = (id: string) => {
+    setExpandedFeeOrders(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
 
   const {
     register,
@@ -190,12 +208,17 @@ export default function FinancePage() {
   const onCreateFeeOrder = async (data: FeeOrderForm) => {
     setFeeOrderError('');
     try {
-      await api.post('/finance/fee-orders', {
+      const payload: Record<string, unknown> = {
         title: data.name,
         amount: parseFloat(data.amount),
         dueDate: data.dueDate,
-        classId: data.classId || undefined,
-      });
+      };
+      if (orderMode === 'individual' && selectedStudents.length > 0) {
+        payload.studentIds = selectedStudents.map(s => s.id);
+      } else {
+        payload.classId = data.classId || undefined;
+      }
+      await api.post('/finance/fee-orders', payload);
       setShowFeeOrderModal(false);
       resetFeeForm();
       fetchFeeOrders();
@@ -221,7 +244,7 @@ export default function FinancePage() {
         </div>
         {canManage && activeTab === 'feeOrders' && (
           <button
-            onClick={() => { resetFeeForm(); setFeeOrderError(''); setShowFeeOrderModal(true); }}
+            onClick={() => { resetFeeForm(); setFeeOrderError(''); setOrderMode('class'); setSelectedStudents([]); setStudentSearch(''); setShowFeeOrderModal(true); }}
             className="flex items-center gap-2 bg-[#16a34a] hover:bg-green-700 text-white px-4 py-2 rounded-lg text-sm font-medium"
           >
             <Plus className="w-4 h-4" />
@@ -527,73 +550,83 @@ export default function FinancePage() {
                 </Link>
               </div>
 
-              {/* Fee Order Dashboard Cards */}
-              {summary.feeOrderBreakdown && summary.feeOrderBreakdown.length > 0 && (
-                <div className="space-y-4">
-                  <h3 className="text-sm font-semibold text-gray-800">Fee Orders — click to view details</h3>
-                  {summary.feeOrderBreakdown.map((fo) => (
-                    <Link
-                      key={fo.feeOrderId}
-                      href={`/dashboard/finance/orders/${fo.feeOrderId}`}
-                      className="block bg-white rounded-xl border border-gray-200 p-5 hover:shadow-md transition-shadow group"
-                    >
-                      <div className="flex items-center justify-between mb-3">
-                        <div>
-                          <h4 className="font-semibold text-gray-900 group-hover:text-[#16a34a] transition-colors">{fo.title}</h4>
-                          <p className="text-xs text-gray-400 mt-0.5">
-                            {fo.invoiceCount} invoice{fo.invoiceCount !== 1 ? 's' : ''} · Due: {formatDate(fo.dueDate)} · Unit: {formatCurrency(fo.amount)}
-                          </p>
-                        </div>
-                        <ChevronRight className="w-5 h-5 text-gray-300 group-hover:text-gray-500 transition-colors shrink-0" />
-                      </div>
+              {/* Fee Orders — collapsible details */}
+              {summary.feeOrderBreakdown && summary.feeOrderBreakdown.length > 0 && (() => {
+                const totalFeeOrders = summary.feeOrderBreakdown.length;
+                const totalSummaryPages = Math.ceil(totalFeeOrders / summaryPerPage);
+                const paginatedFeeOrders = summary.feeOrderBreakdown.slice(
+                  (summaryPage - 1) * summaryPerPage,
+                  summaryPage * summaryPerPage
+                );
+                return (
+                  <div className="space-y-4">
+                    <h3 className="text-sm font-semibold text-gray-800">Fee Orders — click to view details</h3>
+                    {paginatedFeeOrders.map((fo) => {
+                      const isExpanded = expandedFeeOrders.has(fo.feeOrderId);
+                      return (
+                        <div key={fo.feeOrderId} className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+                          <button
+                            type="button"
+                            onClick={() => toggleFeeOrderExpanded(fo.feeOrderId)}
+                            className="w-full p-5 text-left hover:bg-gray-50 transition-colors"
+                          >
+                            <div className="flex items-center justify-between">
+                              <div>
+                                <h4 className="font-semibold text-gray-900">{fo.title}</h4>
+                                <p className="text-xs text-gray-400 mt-0.5">
+                                  {fo.invoiceCount} invoice{fo.invoiceCount !== 1 ? 's' : ''} · Due: {formatDate(fo.dueDate)} · Unit: {formatCurrency(fo.amount)}
+                                </p>
+                              </div>
+                              <div className="flex items-center gap-2 shrink-0">
+                                <Link
+                                  href={`/dashboard/finance/orders/${fo.feeOrderId}`}
+                                  onClick={(e) => e.stopPropagation()}
+                                  className="text-xs text-[#16a34a] hover:underline"
+                                >
+                                  Full Details
+                                </Link>
+                                <ChevronDown className={`w-5 h-5 text-gray-400 transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
+                              </div>
+                            </div>
+                          </button>
 
-                      <div className="grid grid-cols-3 gap-3">
-                        <div className="bg-gray-50 rounded-lg p-3 text-center">
-                          <p className="text-xs text-gray-400 uppercase">To Collect</p>
-                          <p className="text-lg font-bold text-gray-800">{formatCurrency(fo.totalToCollect)}</p>
+                          {isExpanded && (
+                            <div className="px-5 pb-5 border-t border-gray-100 pt-4">
+                              <div className="grid grid-cols-3 gap-3">
+                                <div className="bg-gray-50 rounded-lg p-3 text-center">
+                                  <p className="text-xs text-gray-400 uppercase">To Collect</p>
+                                  <p className="text-lg font-bold text-gray-800">{formatCurrency(fo.totalToCollect)}</p>
+                                </div>
+                                <div className="bg-green-50 rounded-lg p-3 text-center">
+                                  <p className="text-xs text-gray-400 uppercase">Collected</p>
+                                  <p className="text-lg font-bold text-green-700">{formatCurrency(fo.totalCollected)}</p>
+                                  <p className="text-xs text-gray-400">{fo.paidStudents.length} paid</p>
+                                </div>
+                                <div className="bg-red-50 rounded-lg p-3 text-center">
+                                  <p className="text-xs text-gray-400 uppercase">Outstanding</p>
+                                  <p className="text-lg font-bold text-red-600">{formatCurrency(fo.totalOutstanding)}</p>
+                                  <p className="text-xs text-gray-400">{fo.owingStudents.length} owing</p>
+                                </div>
+                              </div>
+                            </div>
+                          )}
                         </div>
-                        <div className="bg-green-50 rounded-lg p-3 text-center">
-                          <p className="text-xs text-gray-400 uppercase">Collected</p>
-                          <p className="text-lg font-bold text-green-700">{formatCurrency(fo.totalCollected)}</p>
-                          <p className="text-xs text-gray-400">{fo.paidStudents.length} paid</p>
-                        </div>
-                        <div className="bg-red-50 rounded-lg p-3 text-center">
-                          <p className="text-xs text-gray-400 uppercase">Outstanding</p>
-                          <p className="text-lg font-bold text-red-600">{formatCurrency(fo.totalOutstanding)}</p>
-                          <p className="text-xs text-gray-400">{fo.owingStudents.length} owing</p>
+                      );
+                    })}
+
+                    {/* Summary Pagination */}
+                    {totalSummaryPages > 1 && (
+                      <div className="flex items-center justify-between mt-4">
+                        <p className="text-sm text-gray-500">Page {summaryPage} of {totalSummaryPages} ({totalFeeOrders} fee order{totalFeeOrders !== 1 ? 's' : ''})</p>
+                        <div className="flex gap-1">
+                          <button onClick={() => setSummaryPage(p => p - 1)} disabled={summaryPage <= 1} className="px-3 py-1.5 text-sm border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-40">Previous</button>
+                          <button onClick={() => setSummaryPage(p => p + 1)} disabled={summaryPage >= totalSummaryPages} className="px-3 py-1.5 text-sm border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-40">Next</button>
                         </div>
                       </div>
-                    </Link>
-                  ))}
-                </div>
-              )}
-
-              {/* Per-Class Breakdown */}
-              {summary.perClassBreakdown && summary.perClassBreakdown.length > 0 && (
-                <div className="bg-white rounded-xl border border-gray-200 p-6">
-                  <h3 className="text-sm font-semibold text-gray-800 mb-4">Per-Class Breakdown</h3>
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-sm">
-                      <thead>
-                        <tr className="bg-gray-50 border-b">
-                          <th className="text-left px-4 py-2.5 text-xs text-gray-400 font-medium">Class</th>
-                          <th className="text-left px-4 py-2.5 text-xs text-gray-400 font-medium">Collected</th>
-                          <th className="text-left px-4 py-2.5 text-xs text-gray-400 font-medium">Outstanding</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-gray-100">
-                        {summary.perClassBreakdown.map((row) => (
-                          <tr key={row.classId} className="hover:bg-gray-50">
-                            <td className="px-4 py-3 font-medium text-gray-800">{row.className}</td>
-                            <td className="px-4 py-3 text-green-700">{formatCurrency(row.collected)}</td>
-                            <td className="px-4 py-3 text-red-600">{formatCurrency(row.outstanding)}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
+                    )}
                   </div>
-                </div>
-              )}
+                );
+              })()}
             </>
           ) : (
             <p className="text-gray-400">Loading summary…</p>
@@ -605,7 +638,7 @@ export default function FinancePage() {
       {showFeeOrderModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center">
           <div className="absolute inset-0 bg-black/50" onClick={() => setShowFeeOrderModal(false)} />
-          <div className="relative bg-white rounded-xl shadow-xl p-6 w-full max-w-md mx-4">
+          <div className="relative bg-white rounded-xl shadow-xl p-6 w-full max-w-lg mx-4 max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between mb-5">
               <h2 className="text-lg font-semibold text-gray-900">Create Fee Order</h2>
               <button onClick={() => setShowFeeOrderModal(false)} className="text-gray-400 hover:text-gray-600"><X className="w-5 h-5" /></button>
@@ -629,20 +662,111 @@ export default function FinancePage() {
                   {feeErrors.dueDate && <p className="text-red-500 text-xs mt-1">{feeErrors.dueDate.message}</p>}
                 </div>
               </div>
+
+              {/* Order Mode Toggle */}
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Apply to Class</label>
-                <select {...register('classId')} className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#16a34a]">
-                  <option value="">Select a class…</option>
-                  {classes.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-                </select>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Apply To</label>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => { setOrderMode('class'); setSelectedStudents([]); }}
+                    className={`px-3 py-1.5 text-sm rounded-lg border transition-colors ${
+                      orderMode === 'class'
+                        ? 'bg-[#16a34a] text-white border-[#16a34a]'
+                        : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
+                    }`}
+                  >
+                    By Class
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setOrderMode('individual')}
+                    className={`px-3 py-1.5 text-sm rounded-lg border transition-colors ${
+                      orderMode === 'individual'
+                        ? 'bg-[#16a34a] text-white border-[#16a34a]'
+                        : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
+                    }`}
+                  >
+                    Individual Students
+                  </button>
+                </div>
               </div>
-              <div className="flex items-center gap-2">
-                <input type="checkbox" id="applyToAll" {...register('applyToAll')} className="w-4 h-4 accent-[#16a34a]" />
-                <label htmlFor="applyToAll" className="text-sm text-gray-700">Apply to all students</label>
-              </div>
+
+              {orderMode === 'class' && (
+                <>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Select Class</label>
+                    <select {...register('classId')} className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#16a34a]">
+                      <option value="">Select a class…</option>
+                      {classes.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                    </select>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <input type="checkbox" id="applyToAll" {...register('applyToAll')} className="w-4 h-4 accent-[#16a34a]" />
+                    <label htmlFor="applyToAll" className="text-sm text-gray-700">Apply to all students (all classes)</label>
+                  </div>
+                </>
+              )}
+
+              {orderMode === 'individual' && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Search & Select Students</label>
+                  <div className="relative">
+                    <input
+                      type="text"
+                      value={studentSearch}
+                      onChange={e => setStudentSearch(e.target.value)}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#16a34a]"
+                      placeholder="Type student name or ID…"
+                    />
+                    {studentSearchLoading && (
+                      <Loader2 className="w-4 h-4 animate-spin absolute right-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                    )}
+                    {studentResults.length > 0 && (
+                      <div className="absolute z-10 w-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg max-h-40 overflow-y-auto">
+                        {studentResults
+                          .filter(s => !selectedStudents.find(sel => sel.id === s.id))
+                          .map(s => (
+                            <button
+                              key={s.id}
+                              type="button"
+                              onClick={() => addStudent(s)}
+                              className="w-full text-left px-3 py-2 text-sm hover:bg-gray-50 flex items-center justify-between"
+                            >
+                              <span>{s.firstName} {s.lastName}</span>
+                              <span className="text-xs text-gray-400">{s.studentId} · {s.class?.name || ''}</span>
+                            </button>
+                          ))}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Selected Students */}
+                  {selectedStudents.length > 0 && (
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      {selectedStudents.map(s => (
+                        <span key={s.id} className="inline-flex items-center gap-1 px-2.5 py-1 bg-green-50 text-green-700 rounded-full text-xs font-medium">
+                          {s.firstName} {s.lastName}
+                          <button type="button" onClick={() => removeStudent(s.id)} className="hover:text-red-600">
+                            <X className="w-3 h-3" />
+                          </button>
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                  {selectedStudents.length === 0 && (
+                    <p className="text-xs text-gray-400 mt-1">Search and select at least one student</p>
+                  )}
+                </div>
+              )}
+
               <div className="flex gap-3 justify-end">
                 <button type="button" onClick={() => setShowFeeOrderModal(false)} className="px-4 py-2 text-sm text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50">Cancel</button>
-                <button type="submit" disabled={feeSubmitting} className="px-4 py-2 text-sm text-white bg-[#16a34a] hover:bg-green-700 rounded-lg disabled:opacity-60 flex items-center gap-2">
+                <button
+                  type="submit"
+                  disabled={feeSubmitting || (orderMode === 'individual' && selectedStudents.length === 0)}
+                  className="px-4 py-2 text-sm text-white bg-[#16a34a] hover:bg-green-700 rounded-lg disabled:opacity-60 flex items-center gap-2"
+                >
                   {feeSubmitting && <Loader2 className="w-4 h-4 animate-spin" />}
                   Create
                 </button>
