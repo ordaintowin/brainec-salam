@@ -1,4 +1,4 @@
-import { Injectable, ForbiddenException, NotFoundException } from '@nestjs/common';
+import { Injectable, ForbiddenException, NotFoundException, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import {
   MarkAttendanceDto,
@@ -10,6 +10,7 @@ import {
 export class AttendanceService {
   constructor(private prisma: PrismaService) {}
 
+  private static readonly MS_PER_DAY = 86_400_000;
   /** Find the active term that covers the given date, if any */
   private async getTermForDate(date: Date) {
     return this.prisma.term.findFirst({
@@ -43,6 +44,56 @@ export class AttendanceService {
         'Past attendance records cannot be modified',
       );
     }
+  }
+
+  /**
+   * Check if a previous school day's attendance is unclosed for the given class.
+   * Returns the unclosed date if found.
+   */
+  async getUnclosedPreviousDay(classId: string): Promise<{ date: Date; dateStr: string } | null> {
+    const today = new Date();
+    today.setUTCHours(0, 0, 0, 0);
+
+    // Find the active term
+    const activeTerm = await this.prisma.term.findFirst({
+      where: { status: 'ACTIVE' },
+      include: {
+        termDays: {
+          where: { isHoliday: false, date: { lt: today } },
+          orderBy: { date: 'desc' },
+          take: 5,
+        },
+      },
+    });
+
+    if (!activeTerm || activeTerm.termDays.length === 0) return null;
+
+    // Check each past school day (most recent first) for unclosed attendance
+    for (const termDay of activeTerm.termDays) {
+      const d = new Date(termDay.date);
+      d.setUTCHours(0, 0, 0, 0);
+
+      // Check if attendance was marked for this day
+      const hasRecords = await this.prisma.attendance.count({
+        where: { classId, date: d, termId: activeTerm.id },
+      });
+
+      if (hasRecords === 0) continue; // No attendance was marked, skip
+
+      // Check if it was closed
+      const closure = await this.prisma.dailyAttendanceClosure.findUnique({
+        where: { classId_date: { classId, date: d } },
+      });
+
+      if (!closure) {
+        return {
+          date: d,
+          dateStr: d.toISOString().split('T')[0],
+        };
+      }
+    }
+
+    return null;
   }
 
   async markAttendance(dto: MarkAttendanceDto, markedById: string, userRole = 'ADMIN') {
@@ -121,6 +172,16 @@ export class AttendanceService {
       );
     }
 
+    // Check if this day's attendance is already closed for this class
+    const closure = await this.prisma.dailyAttendanceClosure.findUnique({
+      where: { classId_date: { classId: dto.classId, date } },
+    });
+    if (closure && user.role !== 'HEADMISTRESS') {
+      throw new ForbiddenException(
+        'Attendance for this day has been closed. Only the headmistress can modify it.',
+      );
+    }
+
     const results = await Promise.all(
       dto.records.map((r) =>
         this.prisma.attendance.upsert({
@@ -148,6 +209,57 @@ export class AttendanceService {
     return { marked: results.length, classId: dto.classId, date: dto.date };
   }
 
+  /**
+   * Close attendance for a class on a specific date.
+   * Only available after 3 PM.
+   */
+  async closeAttendanceForDay(classId: string, dateStr: string, closedById: string, userRole: string) {
+    const date = new Date(dateStr);
+    date.setUTCHours(0, 0, 0, 0);
+
+    const today = new Date();
+    today.setUTCHours(0, 0, 0, 0);
+
+    // Allow closing for today only after 3 PM
+    // Ghana timezone is GMT (UTC+0), so UTC hours match local time
+    if (date.getTime() === today.getTime()) {
+      const now = new Date();
+      const currentHour = now.getUTCHours();
+      // Headmistress can close at any time
+      if (currentHour < 15 && userRole !== 'HEADMISTRESS') {
+        throw new BadRequestException(
+          'Attendance can only be closed after 3:00 PM',
+        );
+      }
+    }
+
+    // Check already closed
+    const existing = await this.prisma.dailyAttendanceClosure.findUnique({
+      where: { classId_date: { classId, date } },
+    });
+    if (existing) {
+      throw new BadRequestException('Attendance for this day is already closed');
+    }
+
+    return this.prisma.dailyAttendanceClosure.create({
+      data: { classId, date, closedBy: closedById },
+    });
+  }
+
+  /**
+   * Check closure status for a specific class and date
+   */
+  async getClosureStatus(classId: string, dateStr: string) {
+    const date = new Date(dateStr);
+    date.setUTCHours(0, 0, 0, 0);
+
+    const closure = await this.prisma.dailyAttendanceClosure.findUnique({
+      where: { classId_date: { classId, date } },
+    });
+
+    return { isClosed: !!closure, closure };
+  }
+
   async getClassAttendance(classId: string, date: string) {
     const d = new Date(date);
     d.setUTCHours(0, 0, 0, 0);
@@ -173,6 +285,15 @@ export class AttendanceService {
     today.setUTCHours(0, 0, 0, 0);
     const isDayOver = d.getTime() < today.getTime();
 
+    // Check daily closure
+    const closure = await this.prisma.dailyAttendanceClosure.findUnique({
+      where: { classId_date: { classId, date: d } },
+    });
+    const isDayClosed = !!closure;
+
+    // Check for unclosed previous day
+    const unclosedPrev = await this.getUnclosedPreviousDay(classId);
+
     return {
       records: students.map((s) => ({
         student: s,
@@ -182,7 +303,8 @@ export class AttendanceService {
       termName: term?.name || null,
       isTermClosed,
       isDayOver,
-      hasActiveTerm: !!term,
+      isDayClosed,
+      unclosedPreviousDay: unclosedPrev,
     };
   }
 
@@ -228,6 +350,9 @@ export class AttendanceService {
     const activeTerm = await this.prisma.term.findFirst({
       where: { status: 'ACTIVE' },
       orderBy: { startDate: 'desc' },
+      include: {
+        termDays: { orderBy: { date: 'asc' } },
+      },
     });
 
     const baseWhere: any = {};
@@ -271,14 +396,45 @@ export class AttendanceService {
     if (classId) studentWhere.classId = classId;
     const totalStudents = await this.prisma.student.count({ where: studentWhere });
 
+    // Term calendar/progress info
+    let termProgress = null;
+    if (activeTerm) {
+      const schoolDays = activeTerm.termDays.filter((d) => !d.isHoliday);
+      const daysCrossed = schoolDays.filter((d) => new Date(d.date) <= today);
+      const daysRemaining = schoolDays.filter((d) => new Date(d.date) > today);
+      const holidays = activeTerm.termDays.filter((d) => d.isHoliday);
+
+      const durationMs = new Date(activeTerm.endDate).getTime() - new Date(activeTerm.startDate).getTime();
+      const durationDays = Math.ceil(durationMs / AttendanceService.MS_PER_DAY) + 1;
+
+      const termStatusCounts = countStatuses(termRecords);
+      const presentAndLate = termStatusCounts.present + termStatusCounts.late;
+      const overallPercent = termStatusCounts.total > 0 ? Math.round((presentAndLate / termStatusCounts.total) * 100) : 0;
+
+      termProgress = {
+        durationDays,
+        totalSchoolDays: schoolDays.length,
+        totalHolidays: holidays.length,
+        daysCrossed: daysCrossed.length,
+        daysRemaining: daysRemaining.length,
+        overallAttendancePercent: overallPercent,
+      };
+    }
+
     return {
       today: countStatuses(dayRecords),
       week: countStatuses(weekRecords),
       term: countStatuses(termRecords),
       totalStudents,
       activeTerm: activeTerm
-        ? { id: activeTerm.id, name: activeTerm.name, startDate: activeTerm.startDate, endDate: activeTerm.endDate }
+        ? {
+            id: activeTerm.id,
+            name: activeTerm.name,
+            startDate: activeTerm.startDate,
+            endDate: activeTerm.endDate,
+          }
         : null,
+      termProgress,
     };
   }
 
@@ -394,11 +550,15 @@ export class AttendanceService {
     // Resolve term
     let term;
     if (termId) {
-      term = await this.prisma.term.findUnique({ where: { id: termId } });
+      term = await this.prisma.term.findUnique({
+        where: { id: termId },
+        include: { termDays: true },
+      });
     } else {
       term = await this.prisma.term.findFirst({
         where: { status: 'ACTIVE' },
         orderBy: { startDate: 'desc' },
+        include: { termDays: true },
       });
     }
 
@@ -421,6 +581,8 @@ export class AttendanceService {
       where: attWhere,
       select: { studentId: true, status: true, date: true },
     });
+
+    const totalSchoolDays = term ? term.termDays.filter((d) => !d.isHoliday).length : 0;
 
     // Build per-student stats
     const studentStats = students.map((s) => {
@@ -448,8 +610,15 @@ export class AttendanceService {
     return {
       class: cls,
       term: term
-        ? { id: term.id, name: term.name, startDate: term.startDate, endDate: term.endDate, status: term.status }
+        ? {
+            id: term.id,
+            name: term.name,
+            startDate: term.startDate,
+            endDate: term.endDate,
+            status: term.status,
+          }
         : null,
+      totalSchoolDays,
       totalRecords: records.length,
       students: studentStats,
     };

@@ -37,6 +37,11 @@ export class TermsController {
     return this.termsService.findOne(id);
   }
 
+  @Get(':id/dashboard')
+  getTermDashboard(@Param('id') id: string) {
+    return this.termsService.getTermDashboard(id);
+  }
+
   @Patch(':id')
   @Roles(Role.HEADMISTRESS)
   update(@Param('id') id: string, @Body() dto: UpdateTermDto) {
@@ -52,5 +57,14 @@ export class TermsController {
   @Get(':id/report')
   getReport(@Param('id') id: string) {
     return this.termsService.getTermReport(id);
+  }
+
+  @Patch('days/:dayId/holiday')
+  @Roles(Role.HEADMISTRESS, Role.ADMIN)
+  toggleHoliday(
+    @Param('dayId') dayId: string,
+    @Body() body: { isHoliday: boolean; label?: string },
+  ) {
+    return this.termsService.toggleHoliday(dayId, body.isHoliday, body.label);
   }
 }

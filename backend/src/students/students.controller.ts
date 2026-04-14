@@ -89,4 +89,20 @@ export class StudentsController {
   restore(@Param('id') id: string) {
     return this.studentsService.restore(id);
   }
+
+  @Get(':id/attendance-history')
+  getAttendanceHistory(@Param('id') id: string) {
+    return this.studentsService.getAttendanceHistory(id);
+  }
+
+  @Get(':id/attendance-history/:termId')
+  getAttendanceDetail(
+    @Param('id') id: string,
+    @Param('termId') termId: string,
+    @Query('status') status?: string,
+    @Query('page', new DefaultValuePipe(1), ParseIntPipe) page?: number,
+    @Query('limit', new DefaultValuePipe(10), ParseIntPipe) limit?: number,
+  ) {
+    return this.studentsService.getAttendanceDetail(id, termId, status, page, limit);
+  }
 }

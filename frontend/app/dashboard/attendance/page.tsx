@@ -1,10 +1,11 @@
 'use client';
 import { useEffect, useState, useCallback } from 'react';
 import Link from 'next/link';
-import { Save, Loader2, ChevronRight, FileText } from 'lucide-react';
+import { Save, Loader2, ChevronRight, FileText, Lock, AlertTriangle } from 'lucide-react';
 import api from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { formatDate } from '@/lib/utils';
+import ConfirmModal from '@/components/ConfirmModal';
 
 interface SchoolClass {
   id: string;
@@ -27,12 +28,22 @@ interface DashboardStats {
   total: number;
 }
 
+interface TermProgress {
+  durationDays: number;
+  totalSchoolDays: number;
+  totalHolidays: number;
+  daysCrossed: number;
+  daysRemaining: number;
+  overallAttendancePercent: number;
+}
+
 interface DashboardData {
   today: DashboardStats;
   week: DashboardStats;
   term: DashboardStats;
   totalStudents: number;
   activeTerm: { id: string; name: string; startDate: string; endDate: string } | null;
+  termProgress: TermProgress | null;
 }
 
 type ActiveView = 'dashboard' | 'mark';
@@ -51,14 +62,32 @@ export default function AttendancePage() {
   const [termName, setTermName] = useState<string | null>(null);
   const [isTermClosed, setIsTermClosed] = useState(false);
   const [isDayOver, setIsDayOver] = useState(false);
-  const [hasActiveTerm, setHasActiveTerm] = useState(true);
+  const [isDayClosed, setIsDayClosed] = useState(false);
+  const [unclosedDay, setUnclosedDay] = useState<{ date: string; dateStr: string } | null>(null);
   const [dashboard, setDashboard] = useState<DashboardData | null>(null);
   const [dashboardClassId, setDashboardClassId] = useState('');
   const [dashboardLoading, setDashboardLoading] = useState(true);
+  const [closingDay, setClosingDay] = useState(false);
+  const [showCloseConfirm, setShowCloseConfirm] = useState(false);
+  const [closingUnclosed, setClosingUnclosed] = useState(false);
+  const [showCloseUnclosedConfirm, setShowCloseUnclosedConfirm] = useState(false);
 
   const isTeacher = user?.role === 'TEACHER';
   const isHeadmistress = user?.role === 'HEADMISTRESS';
-  const isReadOnly = isTermClosed || (isDayOver && !isHeadmistress) || !hasActiveTerm;
+  const isReadOnly = isTermClosed || isDayClosed || (isDayOver && !isHeadmistress);
+
+  // Check if it's after 3 PM (Ghana time = UTC)
+  const isAfter3PM = () => {
+    const now = new Date();
+    return now.getUTCHours() >= 15;
+  };
+
+  // Get current day name and date for display
+  const todayDisplay = () => {
+    const d = new Date(selectedDate);
+    const dayName = d.toLocaleDateString('en-GH', { weekday: 'long' });
+    return { dayName, dateFormatted: formatDate(selectedDate) };
+  };
 
   const fetchClasses = useCallback(async () => {
     try {
@@ -118,13 +147,15 @@ export default function AttendancePage() {
         setTermName(null);
         setIsTermClosed(false);
         setIsDayOver(false);
-        setHasActiveTerm(false);
+        setIsDayClosed(false);
+        setUnclosedDay(null);
       } else {
         attRecords = attRes.data?.records || [];
         setTermName(attRes.data?.termName || null);
         setIsTermClosed(attRes.data?.isTermClosed || false);
         setIsDayOver(attRes.data?.isDayOver || false);
-        setHasActiveTerm(attRes.data?.hasActiveTerm ?? true);
+        setIsDayClosed(attRes.data?.isDayClosed || false);
+        setUnclosedDay(attRes.data?.unclosedPreviousDay || null);
       }
 
       setStudents(
@@ -180,6 +211,43 @@ export default function AttendancePage() {
     }
   };
 
+  const closeAttendanceForDay = async () => {
+    setClosingDay(true);
+    try {
+      await api.post('/attendance/close-day', {
+        classId: selectedClassId,
+        date: selectedDate,
+      });
+      setIsDayClosed(true);
+      setShowCloseConfirm(false);
+    } catch (err: unknown) {
+      const message = (err as { response?: { data?: { message?: string } } })?.response?.data?.message || 'Failed to close attendance';
+      setError(message);
+      setShowCloseConfirm(false);
+    } finally {
+      setClosingDay(false);
+    }
+  };
+
+  const closeUnclosedDay = async () => {
+    if (!unclosedDay) return;
+    setClosingUnclosed(true);
+    try {
+      await api.post('/attendance/close-day', {
+        classId: selectedClassId,
+        date: unclosedDay.dateStr,
+      });
+      setUnclosedDay(null);
+      setShowCloseUnclosedConfirm(false);
+    } catch (err: unknown) {
+      const message = (err as { response?: { data?: { message?: string } } })?.response?.data?.message || 'Failed to close attendance';
+      setError(message);
+      setShowCloseUnclosedConfirm(false);
+    } finally {
+      setClosingUnclosed(false);
+    }
+  };
+
   const statusConfig = {
     PRESENT: { label: 'Present', classes: 'bg-green-100 text-green-700 ring-green-500' },
     ABSENT: { label: 'Absent', classes: 'bg-red-100 text-red-700 ring-red-500' },
@@ -195,6 +263,8 @@ export default function AttendancePage() {
     if (dashboardClassId) params.set('classId', dashboardClassId);
     return `/dashboard/attendance/details?${params.toString()}`;
   };
+
+  const { dayName, dateFormatted } = todayDisplay();
 
   return (
     <div className="p-8">
@@ -252,11 +322,48 @@ export default function AttendancePage() {
             </div>
           ) : dashboard ? (
             <>
-              {/* Active Term Info */}
+              {/* Active Term Info + Progress */}
               {dashboard.activeTerm && (
-                <div className="bg-green-50 border border-green-200 rounded-lg p-3 text-sm text-green-700">
-                  <strong>Active Term:</strong> {dashboard.activeTerm.name} ({formatDate(dashboard.activeTerm.startDate)} — {formatDate(dashboard.activeTerm.endDate)})
-                  <span className="ml-2 text-xs text-green-500">· {dashboard.totalStudents} students</span>
+                <div className="bg-green-50 border border-green-200 rounded-lg p-4">
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="text-sm text-green-700">
+                      <strong>Active Term:</strong> {dashboard.activeTerm.name} ({formatDate(dashboard.activeTerm.startDate)} — {formatDate(dashboard.activeTerm.endDate)})
+                      <span className="ml-2 text-xs text-green-500">· {dashboard.totalStudents} students</span>
+                    </div>
+                  </div>
+                  {dashboard.termProgress && (
+                    <div className="grid grid-cols-2 md:grid-cols-6 gap-3 mt-3">
+                      <div className="bg-white rounded-lg p-2.5 text-center border border-green-100">
+                        <p className="text-[10px] text-gray-400 uppercase">Duration</p>
+                        <p className="text-sm font-bold text-gray-800">{dashboard.termProgress.durationDays} days</p>
+                      </div>
+                      <div className="bg-white rounded-lg p-2.5 text-center border border-green-100">
+                        <p className="text-[10px] text-gray-400 uppercase">School Days</p>
+                        <p className="text-sm font-bold text-gray-800">{dashboard.termProgress.totalSchoolDays}</p>
+                      </div>
+                      <div className="bg-white rounded-lg p-2.5 text-center border border-green-100">
+                        <p className="text-[10px] text-gray-400 uppercase">Days Crossed</p>
+                        <p className="text-sm font-bold text-green-700">{dashboard.termProgress.daysCrossed}</p>
+                      </div>
+                      <div className="bg-white rounded-lg p-2.5 text-center border border-green-100">
+                        <p className="text-[10px] text-gray-400 uppercase">Days Left</p>
+                        <p className="text-sm font-bold text-blue-700">{dashboard.termProgress.daysRemaining}</p>
+                      </div>
+                      <div className="bg-white rounded-lg p-2.5 text-center border border-green-100">
+                        <p className="text-[10px] text-gray-400 uppercase">Holidays</p>
+                        <p className="text-sm font-bold text-orange-600">{dashboard.termProgress.totalHolidays}</p>
+                      </div>
+                      <div className="bg-white rounded-lg p-2.5 text-center border border-green-100">
+                        <p className="text-[10px] text-gray-400 uppercase">Attendance %</p>
+                        <p className={`text-sm font-bold ${
+                          dashboard.termProgress.overallAttendancePercent >= 80 ? 'text-green-700' :
+                          dashboard.termProgress.overallAttendancePercent >= 60 ? 'text-yellow-600' : 'text-red-600'
+                        }`}>
+                          {dashboard.termProgress.overallAttendancePercent}%
+                        </p>
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -310,42 +417,24 @@ export default function AttendancePage() {
               <div>
                 <h3 className="text-sm font-semibold text-gray-800 mb-3">This Week</h3>
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                  <Link
-                    href={buildDetailUrl('week', 'PRESENT')}
-                    className="bg-white rounded-xl border border-gray-200 p-5 hover:shadow-md transition-shadow cursor-pointer group"
-                  >
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <p className="text-xs text-gray-400 uppercase tracking-wider">Present</p>
-                        <p className="text-2xl font-bold text-green-700 mt-1">{dashboard.week.present}</p>
-                      </div>
-                      <ChevronRight className="w-5 h-5 text-gray-300 group-hover:text-gray-500 transition-colors" />
-                    </div>
-                  </Link>
-                  <Link
-                    href={buildDetailUrl('week', 'ABSENT')}
-                    className="bg-white rounded-xl border border-gray-200 p-5 hover:shadow-md transition-shadow cursor-pointer group"
-                  >
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <p className="text-xs text-gray-400 uppercase tracking-wider">Absent</p>
-                        <p className="text-2xl font-bold text-red-600 mt-1">{dashboard.week.absent}</p>
-                      </div>
-                      <ChevronRight className="w-5 h-5 text-gray-300 group-hover:text-gray-500 transition-colors" />
-                    </div>
-                  </Link>
-                  <Link
-                    href={buildDetailUrl('week', 'LATE')}
-                    className="bg-white rounded-xl border border-gray-200 p-5 hover:shadow-md transition-shadow cursor-pointer group"
-                  >
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <p className="text-xs text-gray-400 uppercase tracking-wider">Late</p>
-                        <p className="text-2xl font-bold text-yellow-600 mt-1">{dashboard.week.late}</p>
-                      </div>
-                      <ChevronRight className="w-5 h-5 text-gray-300 group-hover:text-gray-500 transition-colors" />
-                    </div>
-                  </Link>
+                  {(['PRESENT', 'ABSENT', 'LATE'] as const).map(status => {
+                    const colors = { PRESENT: 'text-green-700', ABSENT: 'text-red-600', LATE: 'text-yellow-600' };
+                    return (
+                      <Link
+                        key={status}
+                        href={buildDetailUrl('week', status)}
+                        className="bg-white rounded-xl border border-gray-200 p-5 hover:shadow-md transition-shadow cursor-pointer group"
+                      >
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <p className="text-xs text-gray-400 uppercase tracking-wider">{status.charAt(0) + status.slice(1).toLowerCase()}</p>
+                            <p className={`text-2xl font-bold mt-1 ${colors[status]}`}>{dashboard.week[status.toLowerCase() as keyof DashboardStats]}</p>
+                          </div>
+                          <ChevronRight className="w-5 h-5 text-gray-300 group-hover:text-gray-500 transition-colors" />
+                        </div>
+                      </Link>
+                    );
+                  })}
                 </div>
               </div>
 
@@ -356,42 +445,24 @@ export default function AttendancePage() {
                 </h3>
                 {dashboard.activeTerm ? (
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                    <Link
-                      href={buildDetailUrl('term', 'PRESENT')}
-                      className="bg-white rounded-xl border border-gray-200 p-5 hover:shadow-md transition-shadow cursor-pointer group"
-                    >
-                      <div className="flex items-center justify-between">
-                        <div>
-                          <p className="text-xs text-gray-400 uppercase tracking-wider">Present</p>
-                          <p className="text-2xl font-bold text-green-700 mt-1">{dashboard.term.present}</p>
-                        </div>
-                        <ChevronRight className="w-5 h-5 text-gray-300 group-hover:text-gray-500 transition-colors" />
-                      </div>
-                    </Link>
-                    <Link
-                      href={buildDetailUrl('term', 'ABSENT')}
-                      className="bg-white rounded-xl border border-gray-200 p-5 hover:shadow-md transition-shadow cursor-pointer group"
-                    >
-                      <div className="flex items-center justify-between">
-                        <div>
-                          <p className="text-xs text-gray-400 uppercase tracking-wider">Absent</p>
-                          <p className="text-2xl font-bold text-red-600 mt-1">{dashboard.term.absent}</p>
-                        </div>
-                        <ChevronRight className="w-5 h-5 text-gray-300 group-hover:text-gray-500 transition-colors" />
-                      </div>
-                    </Link>
-                    <Link
-                      href={buildDetailUrl('term', 'LATE')}
-                      className="bg-white rounded-xl border border-gray-200 p-5 hover:shadow-md transition-shadow cursor-pointer group"
-                    >
-                      <div className="flex items-center justify-between">
-                        <div>
-                          <p className="text-xs text-gray-400 uppercase tracking-wider">Late</p>
-                          <p className="text-2xl font-bold text-yellow-600 mt-1">{dashboard.term.late}</p>
-                        </div>
-                        <ChevronRight className="w-5 h-5 text-gray-300 group-hover:text-gray-500 transition-colors" />
-                      </div>
-                    </Link>
+                    {(['PRESENT', 'ABSENT', 'LATE'] as const).map(status => {
+                      const colors = { PRESENT: 'text-green-700', ABSENT: 'text-red-600', LATE: 'text-yellow-600' };
+                      return (
+                        <Link
+                          key={status}
+                          href={buildDetailUrl('term', status)}
+                          className="bg-white rounded-xl border border-gray-200 p-5 hover:shadow-md transition-shadow cursor-pointer group"
+                        >
+                          <div className="flex items-center justify-between">
+                            <div>
+                              <p className="text-xs text-gray-400 uppercase tracking-wider">{status.charAt(0) + status.slice(1).toLowerCase()}</p>
+                              <p className={`text-2xl font-bold mt-1 ${colors[status]}`}>{dashboard.term[status.toLowerCase() as keyof DashboardStats]}</p>
+                            </div>
+                            <ChevronRight className="w-5 h-5 text-gray-300 group-hover:text-gray-500 transition-colors" />
+                          </div>
+                        </Link>
+                      );
+                    })}
                   </div>
                 ) : (
                   <p className="text-gray-400 text-sm">No active term. Create a term to track term-based attendance.</p>
@@ -429,6 +500,42 @@ export default function AttendancePage() {
       {/* ═══════════════ MARK ATTENDANCE VIEW ═══════════════ */}
       {activeView === 'mark' && (
         <div>
+          {/* Day Name & Date Display */}
+          <div className="mb-4 bg-white rounded-lg border border-gray-200 p-4 flex items-center gap-4">
+            <div>
+              <p className="text-lg font-bold text-gray-900">{dayName}</p>
+              <p className="text-sm text-gray-500">{dateFormatted}</p>
+            </div>
+            {termName && (
+              <div className={`ml-auto px-3 py-1 rounded-full text-xs font-medium ${
+                isTermClosed ? 'bg-gray-100 text-gray-500' : 'bg-green-100 text-green-700'
+              }`}>
+                {termName} {isTermClosed && '(CLOSED)'}
+              </div>
+            )}
+          </div>
+
+          {/* Unclosed Previous Day Warning */}
+          {unclosedDay && (
+            <div className="mb-4 p-3 bg-amber-50 border border-amber-200 text-amber-800 rounded-lg text-sm flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <AlertTriangle className="w-4 h-4 text-amber-600" />
+                <span>
+                  Attendance for <strong>{formatDate(unclosedDay.dateStr)}</strong> has not been closed yet.
+                  Please close it before continuing.
+                </span>
+              </div>
+              <button
+                onClick={() => setShowCloseUnclosedConfirm(true)}
+                disabled={closingUnclosed}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-amber-600 hover:bg-amber-700 text-white rounded-lg disabled:opacity-60"
+              >
+                {closingUnclosed ? <Loader2 className="w-3 h-3 animate-spin" /> : <Lock className="w-3 h-3" />}
+                Close {formatDate(unclosedDay.dateStr)}
+              </button>
+            </div>
+          )}
+
           {/* Controls */}
           <div className="flex flex-wrap gap-4 mb-6">
             {!isTeacher && (
@@ -468,27 +575,23 @@ export default function AttendancePage() {
             <div className="mb-4 p-3 bg-red-50 border border-red-200 text-red-700 rounded-lg text-sm">{error}</div>
           )}
 
-          {/* No Active Term Banner */}
-          {!hasActiveTerm && !loading && selectedClassId && (
-            <div className="mb-4 p-3 bg-orange-50 border border-orange-200 text-orange-700 rounded-lg text-sm">
-              <strong>No active term</strong> — attendance cannot be marked until a term is opened. Please go to <a href="/dashboard/terms" className="underline font-medium">Terms</a> to create or activate a term.
+          {/* Term Closed Banner */}
+          {isTermClosed && (
+            <div className="mb-4 p-3 bg-gray-100 border border-gray-200 text-gray-600 rounded-lg text-sm">
+              <strong>Term Closed</strong> — attendance editing is disabled.
             </div>
           )}
 
-          {/* Term Info Banner */}
-          {termName && (
-            <div className={`mb-4 p-3 rounded-lg text-sm flex items-center justify-between ${
-              isTermClosed ? 'bg-gray-100 border border-gray-200 text-gray-600' : 'bg-green-50 border border-green-200 text-green-700'
-            }`}>
-              <span>
-                <strong>Term:</strong> {termName}
-                {isTermClosed && <span className="ml-2 text-xs font-medium bg-gray-200 text-gray-600 px-2 py-0.5 rounded-full">CLOSED — editing disabled</span>}
-              </span>
+          {/* Day Closed Banner */}
+          {isDayClosed && !isTermClosed && (
+            <div className="mb-4 p-3 bg-blue-50 border border-blue-200 text-blue-700 rounded-lg text-sm flex items-center gap-2">
+              <Lock className="w-4 h-4" />
+              <span>Attendance for this day has been closed.</span>
             </div>
           )}
 
           {/* Day Over Banner */}
-          {isDayOver && !isTermClosed && !isHeadmistress && (
+          {isDayOver && !isTermClosed && !isDayClosed && !isHeadmistress && (
             <div className="mb-4 p-3 bg-yellow-50 border border-yellow-200 text-yellow-700 rounded-lg text-sm">
               <strong>Day is over</strong> — attendance for past days cannot be edited.
             </div>
@@ -571,7 +674,18 @@ export default function AttendancePage() {
                 </table>
               </div>
 
-              <div className="flex justify-end">
+              <div className="flex justify-end gap-3">
+                {/* Close Attendance button — only after 3 PM and not already closed */}
+                {!isDayClosed && !isTermClosed && selectedClassId && (isAfter3PM() || isHeadmistress) && (
+                  <button
+                    onClick={() => setShowCloseConfirm(true)}
+                    disabled={closingDay}
+                    className="flex items-center gap-2 bg-amber-500 hover:bg-amber-600 text-white px-5 py-2.5 rounded-lg text-sm font-medium disabled:opacity-60"
+                  >
+                    {closingDay ? <Loader2 className="w-4 h-4 animate-spin" /> : <Lock className="w-4 h-4" />}
+                    Close Attendance for Today
+                  </button>
+                )}
                 <button
                   onClick={saveAttendance}
                   disabled={saving || isReadOnly}
@@ -585,6 +699,30 @@ export default function AttendancePage() {
           )}
         </div>
       )}
+
+      {/* Close Today Confirmation */}
+      <ConfirmModal
+        isOpen={showCloseConfirm}
+        title="Close Attendance for Today"
+        message={`Are you sure you want to close attendance for ${dateFormatted}? Once closed, only the headmistress can modify it.`}
+        confirmLabel="Yes, Close Attendance"
+        confirmClassName="bg-amber-600 hover:bg-amber-700"
+        onConfirm={closeAttendanceForDay}
+        onCancel={() => setShowCloseConfirm(false)}
+        isLoading={closingDay}
+      />
+
+      {/* Close Unclosed Day Confirmation */}
+      <ConfirmModal
+        isOpen={showCloseUnclosedConfirm}
+        title="Close Past Attendance"
+        message={unclosedDay ? `Are you sure you want to close attendance for ${formatDate(unclosedDay.dateStr)}?` : ''}
+        confirmLabel="Yes, Close It"
+        confirmClassName="bg-amber-600 hover:bg-amber-700"
+        onConfirm={closeUnclosedDay}
+        onCancel={() => setShowCloseUnclosedConfirm(false)}
+        isLoading={closingUnclosed}
+      />
     </div>
   );
 }

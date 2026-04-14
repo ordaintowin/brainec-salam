@@ -1,12 +1,20 @@
 'use client';
 import { useEffect, useState, useCallback } from 'react';
-import { Plus, X, Loader2, Lock, FileText, Pencil } from 'lucide-react';
+import { Plus, X, Loader2, Lock, FileText, Calendar, Sun } from 'lucide-react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import api from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { formatDate } from '@/lib/utils';
+import ConfirmModal from '@/components/ConfirmModal';
+
+interface TermDay {
+  id: string;
+  date: string;
+  isHoliday: boolean;
+  label?: string | null;
+}
 
 interface Term {
   id: string;
@@ -16,10 +24,13 @@ interface Term {
   status: 'ACTIVE' | 'CLOSED';
   closedAt?: string;
   createdAt: string;
+  termDays?: TermDay[];
+  _count?: { termDays: number };
 }
 
 interface TermReport {
-  term: Term;
+  term: { id: string; name: string; startDate: string; endDate: string; status: string };
+  totalSchoolDays: number;
   totalRecords: number;
   students: {
     student: {
@@ -54,6 +65,10 @@ export default function TermsPage() {
   const [closing, setClosing] = useState<string | null>(null);
   const [report, setReport] = useState<TermReport | null>(null);
   const [reportLoading, setReportLoading] = useState(false);
+  const [calendarTerm, setCalendarTerm] = useState<Term | null>(null);
+  const [calendarLoading, setCalendarLoading] = useState(false);
+  const [togglingDay, setTogglingDay] = useState<string | null>(null);
+  const [closeConfirm, setCloseConfirm] = useState<string | null>(null);
 
   const {
     register,
@@ -62,15 +77,7 @@ export default function TermsPage() {
     formState: { errors, isSubmitting },
   } = useForm<TermForm>({ resolver: zodResolver(termSchema) });
 
-  const [editModal, setEditModal] = useState<{ open: boolean; term: Term | null }>({ open: false, term: null });
-  const [editError, setEditError] = useState('');
-  const {
-    register: registerEdit,
-    handleSubmit: handleEditSubmit,
-    reset: resetEditForm,
-    setValue: setEditValue,
-    formState: { errors: editErrors, isSubmitting: editSubmitting },
-  } = useForm<TermForm>({ resolver: zodResolver(termSchema) });
+  const hasActiveTerm = terms.some(t => t.status === 'ACTIVE');
 
   const fetchTerms = useCallback(async () => {
     try {
@@ -101,21 +108,23 @@ export default function TermsPage() {
   };
 
   const closeTerm = async (id: string) => {
-    if (!confirm('Are you sure you want to close this term? Once closed, attendance records cannot be edited.')) return;
     setClosing(id);
     try {
       await api.post(`/terms/${id}/close`);
       fetchTerms();
       if (report?.term.id === id) setReport(null);
+      if (calendarTerm?.id === id) setCalendarTerm(null);
     } catch (err: unknown) {
       alert((err as { response?: { data?: { message?: string } } })?.response?.data?.message || 'Failed to close term');
     } finally {
       setClosing(null);
+      setCloseConfirm(null);
     }
   };
 
   const viewReport = async (termId: string) => {
     setReportLoading(true);
+    setCalendarTerm(null);
     try {
       const res = await api.get(`/terms/${termId}/report`);
       setReport(res.data);
@@ -126,52 +135,84 @@ export default function TermsPage() {
     }
   };
 
-  const openEditModal = (term: Term) => {
-    setEditError('');
-    setEditValue('name', term.name);
-    setEditValue('startDate', term.startDate.split('T')[0]);
-    setEditValue('endDate', term.endDate.split('T')[0]);
-    setEditModal({ open: true, term });
-  };
-
-  const onEdit = async (data: TermForm) => {
-    if (!editModal.term) return;
-    setEditError('');
+  const viewCalendar = async (termId: string) => {
+    setCalendarLoading(true);
+    setReport(null);
     try {
-      await api.patch(`/terms/${editModal.term.id}`, data);
-      setEditModal({ open: false, term: null });
-      resetEditForm();
-      fetchTerms();
-    } catch (err: unknown) {
-      const msg = (err as { response?: { data?: { message?: string } } })?.response?.data?.message || 'Failed to update term';
-      setEditError(msg);
+      const res = await api.get(`/terms/${termId}`);
+      setCalendarTerm(res.data);
+    } catch {
+      alert('Failed to load calendar');
+    } finally {
+      setCalendarLoading(false);
     }
   };
 
-  // Check if a term can be closed (end date must be <= today)
-  const canCloseTerm = (term: Term) => {
-    const now = new Date();
-    now.setUTCHours(0, 0, 0, 0);
-    const endDate = new Date(term.endDate);
-    endDate.setUTCHours(0, 0, 0, 0);
-    return endDate.getTime() <= now.getTime();
+  const toggleHoliday = async (dayId: string, isHoliday: boolean) => {
+    setTogglingDay(dayId);
+    try {
+      const label = isHoliday ? prompt('Holiday label (optional):') || undefined : undefined;
+      await api.patch(`/terms/days/${dayId}/holiday`, { isHoliday, label });
+      // Refresh the calendar
+      if (calendarTerm) {
+        const res = await api.get(`/terms/${calendarTerm.id}`);
+        setCalendarTerm(res.data);
+      }
+    } catch {
+      alert('Failed to toggle holiday');
+    } finally {
+      setTogglingDay(null);
+    }
   };
+
+  const handleCreateClick = () => {
+    if (hasActiveTerm) {
+      setCreateError('Please close the current active term before creating a new one.');
+      return;
+    }
+    reset();
+    setCreateError('');
+    setShowModal(true);
+  };
+
+  // Group calendar days by month
+  const groupByMonth = (days: TermDay[]) => {
+    const months: Record<string, TermDay[]> = {};
+    for (const day of days) {
+      const d = new Date(day.date);
+      const key = d.toLocaleDateString('en-GH', { month: 'long', year: 'numeric' });
+      if (!months[key]) months[key] = [];
+      months[key].push(day);
+    }
+    return months;
+  };
+
+  const canManage = user?.role === 'HEADMISTRESS';
 
   return (
     <div className="p-8">
       <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Terms</h1>
-          <p className="text-gray-500 text-sm mt-1">Manage school terms and generate attendance reports</p>
+          <p className="text-gray-500 text-sm mt-1">Manage school terms, calendar, and attendance reports</p>
         </div>
-        <button
-          onClick={() => { reset(); setCreateError(''); setShowModal(true); }}
-          className="flex items-center gap-2 bg-[#16a34a] hover:bg-green-700 text-white px-4 py-2 rounded-lg text-sm font-medium"
-        >
-          <Plus className="w-4 h-4" />
-          Create Term
-        </button>
+        {canManage && (
+          <button
+            onClick={handleCreateClick}
+            className="flex items-center gap-2 bg-[#16a34a] hover:bg-green-700 text-white px-4 py-2 rounded-lg text-sm font-medium"
+          >
+            <Plus className="w-4 h-4" />
+            Create Term
+          </button>
+        )}
       </div>
+
+      {/* Warning if active term exists */}
+      {hasActiveTerm && createError && !showModal && (
+        <div className="mb-4 p-3 bg-yellow-50 border border-yellow-200 text-yellow-700 rounded-lg text-sm">
+          {createError}
+        </div>
+      )}
 
       {loading ? (
         <div className="space-y-3">{[...Array(3)].map((_, i) => <div key={i} className="h-16 bg-gray-100 rounded animate-pulse" />)}</div>
@@ -183,52 +224,127 @@ export default function TermsPage() {
       ) : (
         <div className="space-y-3">
           {terms.map((term) => (
-            <div key={term.id} className={`bg-white rounded-xl border p-5 flex items-center justify-between ${term.status === 'ACTIVE' ? 'border-green-200' : 'border-gray-200'}`}>
-              <div>
-                <div className="flex items-center gap-3">
-                  <h3 className="font-semibold text-gray-900">{term.name}</h3>
-                  <span className={`px-2.5 py-0.5 rounded-full text-xs font-medium ${
-                    term.status === 'ACTIVE'
-                      ? 'bg-green-100 text-green-700'
-                      : 'bg-gray-100 text-gray-500'
-                  }`}>
-                    {term.status}
-                  </span>
+            <div key={term.id} className={`bg-white rounded-xl border p-5 ${term.status === 'ACTIVE' ? 'border-green-200' : 'border-gray-200'}`}>
+              <div className="flex items-center justify-between">
+                <div>
+                  <div className="flex items-center gap-3">
+                    <h3 className="font-semibold text-gray-900">{term.name}</h3>
+                    <span className={`px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                      term.status === 'ACTIVE'
+                        ? 'bg-green-100 text-green-700'
+                        : 'bg-gray-100 text-gray-500'
+                    }`}>
+                      {term.status}
+                    </span>
+                  </div>
+                  <p className="text-sm text-gray-500 mt-1">
+                    {formatDate(term.startDate)} — {formatDate(term.endDate)}
+                    {term._count?.termDays != null && (
+                      <span className="ml-2 text-xs text-gray-400">· {term._count.termDays} school days</span>
+                    )}
+                    {term.closedAt && <span className="ml-2 text-xs text-gray-400">· Closed {formatDate(term.closedAt)}</span>}
+                  </p>
                 </div>
-                <p className="text-sm text-gray-500 mt-1">
-                  {formatDate(term.startDate)} — {formatDate(term.endDate)}
-                  {term.closedAt && <span className="ml-2 text-xs text-gray-400">· Closed {formatDate(term.closedAt)}</span>}
-                </p>
-              </div>
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={() => viewReport(term.id)}
-                  className="flex items-center gap-1.5 px-3 py-1.5 text-sm border border-gray-300 text-gray-700 hover:bg-gray-50 rounded-lg"
-                  disabled={reportLoading}
-                >
-                  <FileText className="w-4 h-4" />
-                  Report
-                </button>
-                {term.status === 'ACTIVE' && (
-                  <>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => viewCalendar(term.id)}
+                    className="flex items-center gap-1.5 px-3 py-1.5 text-sm border border-gray-300 text-gray-700 hover:bg-gray-50 rounded-lg"
+                    disabled={calendarLoading}
+                  >
+                    <Calendar className="w-4 h-4" />
+                    Calendar
+                  </button>
+                  <button
+                    onClick={() => viewReport(term.id)}
+                    className="flex items-center gap-1.5 px-3 py-1.5 text-sm border border-gray-300 text-gray-700 hover:bg-gray-50 rounded-lg"
+                    disabled={reportLoading}
+                  >
+                    <FileText className="w-4 h-4" />
+                    Report
+                  </button>
+                  {term.status === 'ACTIVE' && canManage && (
                     <button
-                      onClick={() => openEditModal(term)}
-                      className="flex items-center gap-1.5 px-3 py-1.5 text-sm border border-gray-300 text-gray-700 hover:bg-gray-50 rounded-lg"
-                    >
-                      <Pencil className="w-4 h-4" />
-                      Edit
-                    </button>
-                    <button
-                      onClick={() => closeTerm(term.id)}
-                      disabled={closing === term.id || !canCloseTerm(term)}
-                      title={!canCloseTerm(term) ? `Cannot close until end date (${formatDate(term.endDate)})` : 'Close this term'}
-                      className="flex items-center gap-1.5 px-3 py-1.5 text-sm bg-red-50 text-red-700 hover:bg-red-100 border border-red-200 rounded-lg disabled:opacity-60 disabled:cursor-not-allowed"
+                      onClick={() => setCloseConfirm(term.id)}
+                      disabled={closing === term.id}
+                      className="flex items-center gap-1.5 px-3 py-1.5 text-sm bg-red-50 text-red-700 hover:bg-red-100 border border-red-200 rounded-lg disabled:opacity-60"
                     >
                       {closing === term.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <Lock className="w-4 h-4" />}
                       Close Term
                     </button>
-                  </>
-                )}
+                  )}
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Term Calendar */}
+      {calendarTerm && calendarTerm.termDays && (
+        <div className="mt-8">
+          <div className="flex items-center justify-between mb-4">
+            <div>
+              <h2 className="text-lg font-semibold text-gray-900">
+                Calendar: {calendarTerm.name}
+              </h2>
+              <p className="text-sm text-gray-500">
+                {calendarTerm.termDays.filter(d => !d.isHoliday).length} school days · {calendarTerm.termDays.filter(d => d.isHoliday).length} holidays
+              </p>
+            </div>
+            <button
+              onClick={() => setCalendarTerm(null)}
+              className="text-gray-400 hover:text-gray-600 text-sm"
+            >
+              Close Calendar
+            </button>
+          </div>
+
+          {Object.entries(groupByMonth(calendarTerm.termDays)).map(([month, days]) => (
+            <div key={month} className="mb-6">
+              <h3 className="text-sm font-semibold text-gray-700 mb-2">{month}</h3>
+              <div className="grid grid-cols-5 md:grid-cols-7 lg:grid-cols-10 gap-2">
+                {days.map(day => {
+                  const d = new Date(day.date);
+                  const dayName = d.toLocaleDateString('en-GH', { weekday: 'short' });
+                  const dayNum = d.getUTCDate();
+                  const today = new Date();
+                  today.setUTCHours(0, 0, 0, 0);
+                  const isPast = d <= today;
+                  const isToday = d.getTime() === today.getTime();
+
+                  return (
+                    <div
+                      key={day.id}
+                      className={`relative p-2 rounded-lg border text-center text-xs transition-all ${
+                        day.isHoliday
+                          ? 'bg-orange-50 border-orange-200 text-orange-700'
+                          : isToday
+                          ? 'bg-green-100 border-green-300 text-green-800 ring-2 ring-green-400'
+                          : isPast
+                          ? 'bg-gray-50 border-gray-200 text-gray-500'
+                          : 'bg-white border-gray-200 text-gray-700'
+                      }`}
+                    >
+                      <p className="font-bold text-sm">{dayNum}</p>
+                      <p className="text-[10px] text-gray-400">{dayName}</p>
+                      {day.isHoliday && (
+                        <div className="flex items-center justify-center gap-0.5 mt-0.5">
+                          <Sun className="w-3 h-3 text-orange-500" />
+                          <span className="text-[9px] text-orange-600 truncate">{day.label || 'Holiday'}</span>
+                        </div>
+                      )}
+                      {canManage && calendarTerm.status === 'ACTIVE' && (
+                        <button
+                          onClick={() => toggleHoliday(day.id, !day.isHoliday)}
+                          disabled={togglingDay === day.id}
+                          className="mt-1 text-[10px] underline text-gray-400 hover:text-gray-700 disabled:opacity-50"
+                        >
+                          {togglingDay === day.id ? '…' : day.isHoliday ? 'Mark School Day' : 'Mark Holiday'}
+                        </button>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
             </div>
           ))}
@@ -252,6 +368,10 @@ export default function TermsPage() {
 
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
             <div className="bg-white rounded-lg border border-gray-200 p-4 text-center">
+              <p className="text-xs text-gray-400 uppercase">School Days</p>
+              <p className="text-xl font-bold text-gray-800">{report.totalSchoolDays}</p>
+            </div>
+            <div className="bg-white rounded-lg border border-gray-200 p-4 text-center">
               <p className="text-xs text-gray-400 uppercase">Total Records</p>
               <p className="text-xl font-bold text-gray-800">{report.totalRecords}</p>
             </div>
@@ -262,10 +382,6 @@ export default function TermsPage() {
             <div className="bg-white rounded-lg border border-gray-200 p-4 text-center">
               <p className="text-xs text-gray-400 uppercase">Period</p>
               <p className="text-sm font-bold text-gray-800">{formatDate(report.term.startDate)} — {formatDate(report.term.endDate)}</p>
-            </div>
-            <div className="bg-white rounded-lg border border-gray-200 p-4 text-center">
-              <p className="text-xs text-gray-400 uppercase">Status</p>
-              <p className={`text-xl font-bold ${report.term.status === 'ACTIVE' ? 'text-green-600' : 'text-gray-500'}`}>{report.term.status}</p>
             </div>
           </div>
 
@@ -316,6 +432,17 @@ export default function TermsPage() {
         </div>
       )}
 
+      {/* Close Term Confirmation */}
+      <ConfirmModal
+        isOpen={!!closeConfirm}
+        title="Close Term"
+        message="Are you sure you want to close this term? Once closed, attendance records cannot be edited."
+        confirmLabel="Close Term"
+        onConfirm={() => closeConfirm && closeTerm(closeConfirm)}
+        onCancel={() => setCloseConfirm(null)}
+        isLoading={!!closing}
+      />
+
       {/* Create Term Modal */}
       {showModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center">
@@ -353,6 +480,10 @@ export default function TermsPage() {
                   {errors.endDate && <p className="text-red-500 text-xs mt-1">{errors.endDate.message}</p>}
                 </div>
               </div>
+
+              <p className="text-xs text-gray-400">
+                School days (weekdays only) will be auto-generated. You can mark holidays afterwards.
+              </p>
 
               <div className="flex gap-3 justify-end">
                 <button

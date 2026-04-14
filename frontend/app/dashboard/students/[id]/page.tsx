@@ -1,7 +1,7 @@
 'use client';
 import { useEffect, useState, useCallback } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import { ArrowLeft, Pencil, Printer } from 'lucide-react';
+import { ArrowLeft, Pencil, Printer, ChevronLeft, ChevronRight } from 'lucide-react';
 import api from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import ProfileCard from '@/components/ProfileCard';
@@ -46,7 +46,21 @@ interface Invoice {
   }[];
 }
 
-interface AttendanceRecord {
+interface TermSummary {
+  termId: string;
+  termName: string;
+  status: string;
+  startDate: string;
+  endDate: string;
+  totalSchoolDays: number;
+  present: number;
+  absent: number;
+  late: number;
+  totalMarked: number;
+  attendancePercent: number;
+}
+
+interface AttendanceDetail {
   id: string;
   date: string;
   status: string;
@@ -59,13 +73,27 @@ export default function StudentDetailPage() {
   const { user } = useAuth();
   const [student, setStudent] = useState<Student | null>(null);
   const [invoices, setInvoices] = useState<Invoice[]>([]);
-  const [attendance, setAttendance] = useState<AttendanceRecord[]>([]);
   const [activeTab, setActiveTab] = useState<'fees' | 'attendance'>('fees');
   const [loading, setLoading] = useState(true);
   const [paymentModal, setPaymentModal] = useState<{ open: boolean; invoiceId: string; studentId: string; balance: number }>({
     open: false, invoiceId: '', studentId: '', balance: 0,
   });
   const [printModal, setPrintModal] = useState<{ open: boolean; invoice: Invoice | null }>({ open: false, invoice: null });
+
+  // Attendance History State
+  const [termSummaries, setTermSummaries] = useState<TermSummary[]>([]);
+  const [attendanceLoading, setAttendanceLoading] = useState(false);
+  const [drillDown, setDrillDown] = useState<{
+    open: boolean;
+    termId: string;
+    termName: string;
+    status: string;
+  } | null>(null);
+  const [detailRecords, setDetailRecords] = useState<AttendanceDetail[]>([]);
+  const [detailMeta, setDetailMeta] = useState<{ total: number; page: number; limit: number; totalPages: number }>({
+    total: 0, page: 1, limit: 10, totalPages: 0,
+  });
+  const [detailLoading, setDetailLoading] = useState(false);
 
   const canManage = user?.role === 'HEADMISTRESS' || user?.role === 'ADMIN';
 
@@ -74,7 +102,6 @@ export default function StudentDetailPage() {
       const sRes = await api.get(`/students/${id}`);
       setStudent(sRes.data);
       setInvoices(Array.isArray(sRes.data?.feeInvoices) ? sRes.data.feeInvoices : []);
-      setAttendance(Array.isArray(sRes.data?.attendances) ? sRes.data.attendances : []);
     } catch {
       // silently handle
     } finally {
@@ -82,9 +109,59 @@ export default function StudentDetailPage() {
     }
   }, [id]);
 
+  const fetchAttendanceHistory = useCallback(async () => {
+    setAttendanceLoading(true);
+    try {
+      const res = await api.get(`/students/${id}/attendance-history`);
+      setTermSummaries(Array.isArray(res.data) ? res.data : []);
+    } catch {
+      setTermSummaries([]);
+    } finally {
+      setAttendanceLoading(false);
+    }
+  }, [id]);
+
+  const fetchDetail = useCallback(async (termId: string, status: string, page = 1) => {
+    setDetailLoading(true);
+    try {
+      const res = await api.get(`/students/${id}/attendance-history/${termId}`, {
+        params: { status, page, limit: 10 },
+      });
+      setDetailRecords(Array.isArray(res.data?.data) ? res.data.data : []);
+      setDetailMeta(res.data?.meta || { total: 0, page: 1, limit: 10, totalPages: 0 });
+    } catch {
+      setDetailRecords([]);
+      setDetailMeta({ total: 0, page: 1, limit: 10, totalPages: 0 });
+    } finally {
+      setDetailLoading(false);
+    }
+  }, [id]);
+
   useEffect(() => {
     fetchStudent();
   }, [fetchStudent]);
+
+  useEffect(() => {
+    if (activeTab === 'attendance') {
+      fetchAttendanceHistory();
+    }
+  }, [activeTab, fetchAttendanceHistory]);
+
+  const handleDrillDown = (termId: string, termName: string, status: string) => {
+    setDrillDown({ open: true, termId, termName, status });
+    fetchDetail(termId, status, 1);
+  };
+
+  const handleDetailPageChange = (newPage: number) => {
+    if (!drillDown) return;
+    fetchDetail(drillDown.termId, drillDown.status, newPage);
+  };
+
+  const closeDrillDown = () => {
+    setDrillDown(null);
+    setDetailRecords([]);
+    setDetailMeta({ total: 0, page: 1, limit: 10, totalPages: 0 });
+  };
 
   if (loading) {
     return (
@@ -140,7 +217,7 @@ export default function StudentDetailPage() {
           {(['fees', 'attendance'] as const).map(tab => (
             <button
               key={tab}
-              onClick={() => setActiveTab(tab)}
+              onClick={() => { setActiveTab(tab); closeDrillDown(); }}
               className={`px-6 py-3 text-sm font-medium border-b-2 transition-colors capitalize ${
                 activeTab === tab
                   ? 'border-[#16a34a] text-[#16a34a]'
@@ -211,37 +288,222 @@ export default function StudentDetailPage() {
           </div>
         )}
 
-        {activeTab === 'attendance' && (
-          <div className="overflow-x-auto">
-            {attendance.length === 0 ? (
+        {activeTab === 'attendance' && !drillDown && (
+          <div>
+            {attendanceLoading ? (
+              <div className="animate-pulse space-y-3 py-4">
+                {[1, 2, 3].map(i => (
+                  <div key={i} className="h-12 bg-gray-100 rounded" />
+                ))}
+              </div>
+            ) : termSummaries.length === 0 ? (
               <p className="text-gray-400 text-sm py-4">No attendance records found.</p>
             ) : (
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="bg-gray-50 border-b">
-                    <th className="text-left px-4 py-3 text-xs text-gray-400 font-medium">Date</th>
-                    <th className="text-left px-4 py-3 text-xs text-gray-400 font-medium">Status</th>
-                    <th className="text-left px-4 py-3 text-xs text-gray-400 font-medium">Notes</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-100">
-                  {attendance.map(rec => (
-                    <tr key={rec.id} className="hover:bg-gray-50">
-                      <td className="px-4 py-3">{formatDate(rec.date)}</td>
-                      <td className="px-4 py-3">
-                        <span className={`px-2.5 py-0.5 rounded-full text-xs font-medium ${
-                          rec.status === 'PRESENT' ? 'bg-green-100 text-green-700' :
-                          rec.status === 'LATE' ? 'bg-yellow-100 text-yellow-700' :
-                          'bg-red-100 text-red-700'
-                        }`}>
-                          {rec.status}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3 text-gray-500">{rec.notes || '—'}</td>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="bg-gray-50 border-b">
+                      <th className="text-left px-4 py-3 text-xs text-gray-400 font-medium">Term</th>
+                      <th className="text-left px-4 py-3 text-xs text-gray-400 font-medium">Period</th>
+                      <th className="text-left px-4 py-3 text-xs text-gray-400 font-medium">Status</th>
+                      <th className="text-center px-4 py-3 text-xs text-gray-400 font-medium">School Days</th>
+                      <th className="text-center px-4 py-3 text-xs text-gray-400 font-medium">Present</th>
+                      <th className="text-center px-4 py-3 text-xs text-gray-400 font-medium">Absent</th>
+                      <th className="text-center px-4 py-3 text-xs text-gray-400 font-medium">Late</th>
+                      <th className="text-center px-4 py-3 text-xs text-gray-400 font-medium">Attendance</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100">
+                    {termSummaries.map(term => (
+                      <tr key={term.termId} className="hover:bg-gray-50">
+                        <td className="px-4 py-3 font-medium text-gray-900">{term.termName}</td>
+                        <td className="px-4 py-3 text-gray-500 text-xs">
+                          {formatDate(term.startDate)} — {formatDate(term.endDate)}
+                        </td>
+                        <td className="px-4 py-3">
+                          <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                            term.status === 'ACTIVE'
+                              ? 'bg-green-100 text-green-700'
+                              : 'bg-gray-100 text-gray-600'
+                          }`}>
+                            {term.status}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3 text-center text-gray-700 font-medium">{term.totalSchoolDays}</td>
+                        <td className="px-4 py-3 text-center">
+                          <button
+                            onClick={() => handleDrillDown(term.termId, term.termName, 'PRESENT')}
+                            className="inline-flex items-center justify-center min-w-[2.5rem] px-2 py-1 rounded-md text-xs font-semibold bg-green-50 text-green-700 hover:bg-green-100 transition-colors cursor-pointer"
+                            title="View present days"
+                          >
+                            {term.present}
+                          </button>
+                        </td>
+                        <td className="px-4 py-3 text-center">
+                          <button
+                            onClick={() => handleDrillDown(term.termId, term.termName, 'ABSENT')}
+                            className="inline-flex items-center justify-center min-w-[2.5rem] px-2 py-1 rounded-md text-xs font-semibold bg-red-50 text-red-700 hover:bg-red-100 transition-colors cursor-pointer"
+                            title="View absent days"
+                          >
+                            {term.absent}
+                          </button>
+                        </td>
+                        <td className="px-4 py-3 text-center">
+                          <button
+                            onClick={() => handleDrillDown(term.termId, term.termName, 'LATE')}
+                            className="inline-flex items-center justify-center min-w-[2.5rem] px-2 py-1 rounded-md text-xs font-semibold bg-yellow-50 text-yellow-700 hover:bg-yellow-100 transition-colors cursor-pointer"
+                            title="View late days"
+                          >
+                            {term.late}
+                          </button>
+                        </td>
+                        <td className="px-4 py-3 text-center">
+                          <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold ${
+                            term.attendancePercent >= 80
+                              ? 'bg-green-100 text-green-700'
+                              : term.attendancePercent >= 60
+                              ? 'bg-yellow-100 text-yellow-700'
+                              : 'bg-red-100 text-red-700'
+                          }`}>
+                            {term.attendancePercent}%
+                          </span>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        )}
+
+        {activeTab === 'attendance' && drillDown && (
+          <div>
+            {/* Drill-down header */}
+            <div className="flex items-center gap-3 mb-4">
+              <button
+                onClick={closeDrillDown}
+                className="p-1.5 hover:bg-gray-100 rounded-lg text-gray-500 transition-colors"
+              >
+                <ArrowLeft className="w-4 h-4" />
+              </button>
+              <div>
+                <h3 className="text-sm font-semibold text-gray-900">
+                  {drillDown.termName}
+                </h3>
+                <p className="text-xs text-gray-500">
+                  Showing all{' '}
+                  <span className={`font-semibold ${
+                    drillDown.status === 'PRESENT' ? 'text-green-600' :
+                    drillDown.status === 'ABSENT' ? 'text-red-600' :
+                    'text-yellow-600'
+                  }`}>
+                    {drillDown.status.toLowerCase()}
+                  </span>{' '}
+                  days — {detailMeta.total} record{detailMeta.total !== 1 ? 's' : ''}
+                </p>
+              </div>
+            </div>
+
+            {detailLoading ? (
+              <div className="animate-pulse space-y-3 py-4">
+                {[1, 2, 3, 4, 5].map(i => (
+                  <div key={i} className="h-10 bg-gray-100 rounded" />
+                ))}
+              </div>
+            ) : detailRecords.length === 0 ? (
+              <p className="text-gray-400 text-sm py-4">No records found.</p>
+            ) : (
+              <>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="bg-gray-50 border-b">
+                        <th className="text-left px-4 py-3 text-xs text-gray-400 font-medium w-8">#</th>
+                        <th className="text-left px-4 py-3 text-xs text-gray-400 font-medium">Date</th>
+                        <th className="text-left px-4 py-3 text-xs text-gray-400 font-medium">Day</th>
+                        <th className="text-left px-4 py-3 text-xs text-gray-400 font-medium">Status</th>
+                        <th className="text-left px-4 py-3 text-xs text-gray-400 font-medium">Notes</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-100">
+                      {detailRecords.map((rec, idx) => {
+                        const d = new Date(rec.date);
+                        const dayName = d.toLocaleDateString('en-GH', { weekday: 'long' });
+                        const rowNum = (detailMeta.page - 1) * detailMeta.limit + idx + 1;
+                        return (
+                          <tr key={rec.id} className="hover:bg-gray-50">
+                            <td className="px-4 py-3 text-gray-400 text-xs">{rowNum}</td>
+                            <td className="px-4 py-3 text-gray-700">{formatDate(rec.date)}</td>
+                            <td className="px-4 py-3 text-gray-500">{dayName}</td>
+                            <td className="px-4 py-3">
+                              <span className={`px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                                rec.status === 'PRESENT' ? 'bg-green-100 text-green-700' :
+                                rec.status === 'LATE' ? 'bg-yellow-100 text-yellow-700' :
+                                'bg-red-100 text-red-700'
+                              }`}>
+                                {rec.status}
+                              </span>
+                            </td>
+                            <td className="px-4 py-3 text-gray-500">{rec.notes || '—'}</td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+
+                {/* Pagination */}
+                {detailMeta.totalPages > 1 && (
+                  <div className="flex items-center justify-between mt-4 px-2">
+                    <p className="text-xs text-gray-500">
+                      Showing {(detailMeta.page - 1) * detailMeta.limit + 1}–{Math.min(detailMeta.page * detailMeta.limit, detailMeta.total)} of {detailMeta.total}
+                    </p>
+                    <div className="flex items-center gap-1">
+                      <button
+                        onClick={() => handleDetailPageChange(detailMeta.page - 1)}
+                        disabled={detailMeta.page <= 1}
+                        className="p-1.5 rounded-md hover:bg-gray-100 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                      >
+                        <ChevronLeft className="w-4 h-4" />
+                      </button>
+                      {Array.from({ length: detailMeta.totalPages }, (_, i) => i + 1)
+                        .filter(p => p === 1 || p === detailMeta.totalPages || Math.abs(p - detailMeta.page) <= 1)
+                        .reduce<(number | string)[]>((acc, p, i, arr) => {
+                          if (i > 0 && typeof arr[i - 1] === 'number' && (p as number) - (arr[i - 1] as number) > 1) {
+                            acc.push('...');
+                          }
+                          acc.push(p);
+                          return acc;
+                        }, [])
+                        .map((p, i) =>
+                          typeof p === 'string' ? (
+                            <span key={`ellipsis-${i}`} className="px-2 text-xs text-gray-400">…</span>
+                          ) : (
+                            <button
+                              key={p}
+                              onClick={() => handleDetailPageChange(p)}
+                              className={`w-8 h-8 rounded-md text-xs font-medium transition-colors ${
+                                p === detailMeta.page
+                                  ? 'bg-[#16a34a] text-white'
+                                  : 'hover:bg-gray-100 text-gray-600'
+                              }`}
+                            >
+                              {p}
+                            </button>
+                          )
+                        )}
+                      <button
+                        onClick={() => handleDetailPageChange(detailMeta.page + 1)}
+                        disabled={detailMeta.page >= detailMeta.totalPages}
+                        className="p-1.5 rounded-md hover:bg-gray-100 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                      >
+                        <ChevronRight className="w-4 h-4" />
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </>
             )}
           </div>
         )}
