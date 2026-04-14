@@ -1,10 +1,11 @@
 'use client';
 import { useEffect, useState, useCallback } from 'react';
-import { Users, GraduationCap, BookOpen, ClipboardCheck } from 'lucide-react';
+import Link from 'next/link';
+import { Users, GraduationCap, BookOpen, ClipboardCheck, CalendarRange, ChevronRight } from 'lucide-react';
 import { useAuth } from '@/lib/auth';
 import api from '@/lib/api';
 import StatCard from '@/components/StatCard';
-import { formatDateTime, formatCurrency } from '@/lib/utils';
+import { formatDateTime, formatCurrency, formatDate } from '@/lib/utils';
 
 interface DashboardStats {
   totalStudents: number;
@@ -30,11 +31,27 @@ interface TeacherDashboard {
   todayLate: number;
 }
 
+interface ActiveTermInfo {
+  id: string;
+  name: string;
+  startDate: string;
+  endDate: string;
+  termProgress?: {
+    durationDays: number;
+    totalSchoolDays: number;
+    totalHolidays: number;
+    daysCrossed: number;
+    daysRemaining: number;
+    overallAttendancePercent: number;
+  } | null;
+}
+
 export default function DashboardPage() {
   const { user } = useAuth();
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [recentPayments, setRecentPayments] = useState<RecentPayment[]>([]);
   const [teacherData, setTeacherData] = useState<TeacherDashboard | null>(null);
+  const [activeTerm, setActiveTerm] = useState<ActiveTermInfo | null>(null);
   const [loading, setLoading] = useState(true);
 
   const fetchData = useCallback(async () => {
@@ -43,13 +60,21 @@ export default function DashboardPage() {
         const res = await api.get('/dashboard/teacher');
         setTeacherData(res.data);
       } else {
-        const [statsRes, paymentsRes] = await Promise.all([
+        const [statsRes, paymentsRes, dashRes] = await Promise.all([
           api.get('/dashboard/stats'),
           api.get('/finance/payments', { params: { limit: 10 } }),
+          api.get('/attendance/dashboard'),
         ]);
         setStats(statsRes.data);
         const payments = paymentsRes.data?.data || paymentsRes.data || [];
         setRecentPayments(Array.isArray(payments) ? payments : []);
+
+        if (dashRes.data?.activeTerm) {
+          setActiveTerm({
+            ...dashRes.data.activeTerm,
+            termProgress: dashRes.data.termProgress || null,
+          });
+        }
       }
     } catch {
       // silently fail
@@ -122,6 +147,60 @@ export default function DashboardPage() {
             <StatCard title="Total Classes" value={stats.totalClasses} icon={BookOpen} color="#0891b2" />
           </div>
         </>
+      )}
+
+      {/* Active Term Overview */}
+      {activeTerm && (
+        <div className="mb-8">
+          <Link
+            href="/dashboard/attendance"
+            className="block bg-green-50 border border-green-200 rounded-xl p-5 hover:shadow-md transition-shadow group"
+          >
+            <div className="flex items-center justify-between mb-3">
+              <div className="flex items-center gap-3">
+                <CalendarRange className="w-5 h-5 text-green-600" />
+                <h2 className="text-base font-semibold text-green-800">Active Term: {activeTerm.name}</h2>
+              </div>
+              <ChevronRight className="w-5 h-5 text-green-400 group-hover:text-green-600 transition-colors" />
+            </div>
+            <p className="text-sm text-green-700 mb-3">
+              {formatDate(activeTerm.startDate)} — {formatDate(activeTerm.endDate)}
+            </p>
+            {activeTerm.termProgress && (
+              <div className="grid grid-cols-3 md:grid-cols-6 gap-2">
+                <div className="bg-white rounded-lg p-2 text-center border border-green-100">
+                  <p className="text-[10px] text-gray-400 uppercase">Duration</p>
+                  <p className="text-xs font-bold text-gray-800">{activeTerm.termProgress.durationDays}d</p>
+                </div>
+                <div className="bg-white rounded-lg p-2 text-center border border-green-100">
+                  <p className="text-[10px] text-gray-400 uppercase">School Days</p>
+                  <p className="text-xs font-bold text-gray-800">{activeTerm.termProgress.totalSchoolDays}</p>
+                </div>
+                <div className="bg-white rounded-lg p-2 text-center border border-green-100">
+                  <p className="text-[10px] text-gray-400 uppercase">Crossed</p>
+                  <p className="text-xs font-bold text-green-700">{activeTerm.termProgress.daysCrossed}</p>
+                </div>
+                <div className="bg-white rounded-lg p-2 text-center border border-green-100">
+                  <p className="text-[10px] text-gray-400 uppercase">Remaining</p>
+                  <p className="text-xs font-bold text-blue-700">{activeTerm.termProgress.daysRemaining}</p>
+                </div>
+                <div className="bg-white rounded-lg p-2 text-center border border-green-100">
+                  <p className="text-[10px] text-gray-400 uppercase">Holidays</p>
+                  <p className="text-xs font-bold text-orange-600">{activeTerm.termProgress.totalHolidays}</p>
+                </div>
+                <div className="bg-white rounded-lg p-2 text-center border border-green-100">
+                  <p className="text-[10px] text-gray-400 uppercase">Attendance</p>
+                  <p className={`text-xs font-bold ${
+                    activeTerm.termProgress.overallAttendancePercent >= 80 ? 'text-green-700' :
+                    activeTerm.termProgress.overallAttendancePercent >= 60 ? 'text-yellow-600' : 'text-red-600'
+                  }`}>
+                    {activeTerm.termProgress.overallAttendancePercent}%
+                  </p>
+                </div>
+              </div>
+            )}
+          </Link>
+        </div>
       )}
 
       {/* Recent Payments */}
