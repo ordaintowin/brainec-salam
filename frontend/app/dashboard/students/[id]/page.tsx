@@ -1,7 +1,7 @@
 'use client';
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useMemo } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import { ArrowLeft, Pencil, Printer, ChevronLeft, ChevronRight } from 'lucide-react';
+import { ArrowLeft, Pencil, Printer, ChevronLeft, ChevronRight, Calendar, CheckCircle2, XCircle, Clock, TrendingUp, Archive } from 'lucide-react';
 import api from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import ProfileCard from '@/components/ProfileCard';
@@ -67,6 +67,101 @@ interface AttendanceDetail {
   notes?: string;
 }
 
+/* ---------- Pagination subcomponent ---------- */
+function PaginationBar({
+  meta,
+  onPageChange,
+}: {
+  meta: { total: number; page: number; limit: number; totalPages: number };
+  onPageChange: (p: number) => void;
+}) {
+  if (meta.totalPages <= 1) return null;
+  return (
+    <div className="flex items-center justify-between mt-4 px-2">
+      <p className="text-xs text-gray-500">
+        Showing {(meta.page - 1) * meta.limit + 1}–{Math.min(meta.page * meta.limit, meta.total)} of {meta.total}
+      </p>
+      <div className="flex items-center gap-1">
+        <button
+          onClick={() => onPageChange(meta.page - 1)}
+          disabled={meta.page <= 1}
+          className="p-1.5 rounded-md hover:bg-gray-100 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+        >
+          <ChevronLeft className="w-4 h-4" />
+        </button>
+        {Array.from({ length: meta.totalPages }, (_, i) => i + 1)
+          .filter(p => p === 1 || p === meta.totalPages || Math.abs(p - meta.page) <= 1)
+          .reduce<(number | string)[]>((acc, p, i, arr) => {
+            if (i > 0 && typeof arr[i - 1] === 'number' && (p as number) - (arr[i - 1] as number) > 1) {
+              acc.push('...');
+            }
+            acc.push(p);
+            return acc;
+          }, [])
+          .map((p, i) =>
+            typeof p === 'string' ? (
+              <span key={`ellipsis-${i}`} className="px-2 text-xs text-gray-400">…</span>
+            ) : (
+              <button
+                key={p}
+                onClick={() => onPageChange(p)}
+                className={`w-8 h-8 rounded-md text-xs font-medium transition-colors ${
+                  p === meta.page
+                    ? 'bg-[#16a34a] text-white'
+                    : 'hover:bg-gray-100 text-gray-600'
+                }`}
+              >
+                {p}
+              </button>
+            ),
+          )}
+        <button
+          onClick={() => onPageChange(meta.page + 1)}
+          disabled={meta.page >= meta.totalPages}
+          className="p-1.5 rounded-md hover:bg-gray-100 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+        >
+          <ChevronRight className="w-4 h-4" />
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/* ---------- Status color map (shared across renders) ---------- */
+const STATUS_COLOR_MAP: Record<string, string> = {
+  PRESENT: 'text-green-600',
+  ABSENT: 'text-red-600',
+  LATE: 'text-yellow-600',
+};
+
+/* ---------- Clickable count badge ---------- */
+function CountBadge({
+  count,
+  variant,
+  onClick,
+  title,
+}: {
+  count: number;
+  variant: 'present' | 'absent' | 'late';
+  onClick: () => void;
+  title: string;
+}) {
+  const styles = {
+    present: 'bg-green-50 text-green-700 hover:bg-green-100',
+    absent: 'bg-red-50 text-red-700 hover:bg-red-100',
+    late: 'bg-yellow-50 text-yellow-700 hover:bg-yellow-100',
+  };
+  return (
+    <button
+      onClick={onClick}
+      className={`inline-flex items-center justify-center min-w-[2.5rem] px-2 py-1 rounded-md text-xs font-semibold transition-colors cursor-pointer ${styles[variant]}`}
+      title={title}
+    >
+      {count}
+    </button>
+  );
+}
+
 export default function StudentDetailPage() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
@@ -95,7 +190,27 @@ export default function StudentDetailPage() {
   });
   const [detailLoading, setDetailLoading] = useState(false);
 
+  // Pagination for past terms archive
+  const ARCHIVE_PAGE_SIZE = 5;
+  const [archivePage, setArchivePage] = useState(1);
+
   const canManage = user?.role === 'HEADMISTRESS' || user?.role === 'ADMIN';
+
+  // Split terms into active vs closed
+  const activeTerm = useMemo(() => termSummaries.find(t => t.status === 'ACTIVE') || null, [termSummaries]);
+  const closedTerms = useMemo(() => termSummaries.filter(t => t.status !== 'ACTIVE'), [termSummaries]);
+
+  // Paginate closed terms
+  const closedTermsMeta = useMemo(() => {
+    const total = closedTerms.length;
+    const totalPages = Math.ceil(total / ARCHIVE_PAGE_SIZE) || 1;
+    return { total, page: archivePage, limit: ARCHIVE_PAGE_SIZE, totalPages };
+  }, [closedTerms, archivePage]);
+
+  const pagedClosedTerms = useMemo(() => {
+    const start = (archivePage - 1) * ARCHIVE_PAGE_SIZE;
+    return closedTerms.slice(start, start + ARCHIVE_PAGE_SIZE);
+  }, [closedTerms, archivePage]);
 
   const fetchStudent = useCallback(async () => {
     try {
@@ -175,6 +290,326 @@ export default function StudentDetailPage() {
   if (!student) {
     return <div className="p-8 text-gray-500">Student not found.</div>;
   }
+
+  /* ---------- Render: Active Term Progress Card ---------- */
+  const renderActiveTermCard = (term: TermSummary) => {
+    const progressPct = term.totalSchoolDays > 0 ? Math.round((term.totalMarked / term.totalSchoolDays) * 100) : 0;
+    const attendedDays = term.present + term.late;
+
+    return (
+      <div className="bg-white border border-green-200 rounded-xl shadow-sm overflow-hidden">
+        {/* Header */}
+        <div className="bg-gradient-to-r from-green-50 to-emerald-50 px-5 py-4 border-b border-green-100">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="p-2 bg-green-100 rounded-lg">
+                <Calendar className="w-5 h-5 text-green-700" />
+              </div>
+              <div>
+                <h3 className="text-sm font-bold text-gray-900">{term.termName}</h3>
+                <p className="text-xs text-gray-500">
+                  {formatDate(term.startDate)} — {formatDate(term.endDate)}
+                </p>
+              </div>
+            </div>
+            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-green-100 text-green-700">
+              <span className="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse" />
+              Current Term
+            </span>
+          </div>
+        </div>
+
+        {/* Body */}
+        <div className="p-5 space-y-5">
+          {/* Progress bar */}
+          <div>
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-xs font-medium text-gray-500">Term Progress</span>
+              <span className="text-xs font-bold text-gray-700">
+                {term.totalMarked} of {term.totalSchoolDays} school days
+              </span>
+            </div>
+            <div className="w-full bg-gray-100 rounded-full h-2.5">
+              <div
+                className="bg-gradient-to-r from-green-500 to-emerald-500 h-2.5 rounded-full transition-all duration-500"
+                style={{ width: `${Math.min(progressPct, 100)}%` }}
+              />
+            </div>
+            <p className="text-xs text-gray-400 mt-1">{progressPct}% of term completed</p>
+          </div>
+
+          {/* Stats grid */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <button
+              onClick={() => handleDrillDown(term.termId, term.termName, 'PRESENT')}
+              className="flex flex-col items-center p-3 rounded-lg bg-green-50 hover:bg-green-100 transition-colors cursor-pointer border border-green-100"
+            >
+              <CheckCircle2 className="w-5 h-5 text-green-600 mb-1" />
+              <span className="text-lg font-bold text-green-700">{term.present}</span>
+              <span className="text-[10px] text-green-600 font-medium">Present</span>
+            </button>
+
+            <button
+              onClick={() => handleDrillDown(term.termId, term.termName, 'ABSENT')}
+              className="flex flex-col items-center p-3 rounded-lg bg-red-50 hover:bg-red-100 transition-colors cursor-pointer border border-red-100"
+            >
+              <XCircle className="w-5 h-5 text-red-500 mb-1" />
+              <span className="text-lg font-bold text-red-700">{term.absent}</span>
+              <span className="text-[10px] text-red-600 font-medium">Absent</span>
+            </button>
+
+            <button
+              onClick={() => handleDrillDown(term.termId, term.termName, 'LATE')}
+              className="flex flex-col items-center p-3 rounded-lg bg-yellow-50 hover:bg-yellow-100 transition-colors cursor-pointer border border-yellow-100"
+            >
+              <Clock className="w-5 h-5 text-yellow-600 mb-1" />
+              <span className="text-lg font-bold text-yellow-700">{term.late}</span>
+              <span className="text-[10px] text-yellow-600 font-medium">Late</span>
+            </button>
+
+            <div className="flex flex-col items-center p-3 rounded-lg bg-blue-50 border border-blue-100">
+              <TrendingUp className="w-5 h-5 text-blue-600 mb-1" />
+              <span className={`text-lg font-bold ${
+                term.attendancePercent >= 80 ? 'text-green-700' :
+                term.attendancePercent >= 60 ? 'text-yellow-700' :
+                'text-red-700'
+              }`}>
+                {term.attendancePercent}%
+              </span>
+              <span className="text-[10px] text-blue-600 font-medium">Attendance</span>
+            </div>
+          </div>
+
+          {/* Summary line */}
+          <div className="text-xs text-gray-500 text-center bg-gray-50 rounded-lg py-2 px-3">
+            Out of <strong className="text-gray-700">{term.totalSchoolDays}</strong> school days,{' '}
+            <strong className="text-green-700">{attendedDays}</strong> attended so far
+            {term.totalSchoolDays - term.totalMarked > 0 && (
+              <> · <strong className="text-gray-700">{term.totalSchoolDays - term.totalMarked}</strong> days remaining</>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  /* ---------- Render: Past Terms Archive Table ---------- */
+  const renderPastTermsTable = (terms: TermSummary[]) => {
+    if (terms.length === 0) return null;
+
+    return (
+      <div className="mt-6">
+        <div className="flex items-center gap-2 mb-3">
+          <Archive className="w-4 h-4 text-gray-400" />
+          <h3 className="text-sm font-semibold text-gray-700">Past Terms</h3>
+          <span className="text-xs text-gray-400">({closedTerms.length} term{closedTerms.length !== 1 ? 's' : ''})</span>
+        </div>
+
+        <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="bg-gray-50 border-b border-gray-200">
+                  <th className="text-left px-4 py-3 text-xs text-gray-500 font-semibold">Term</th>
+                  <th className="text-left px-4 py-3 text-xs text-gray-500 font-semibold">Period</th>
+                  <th className="text-center px-4 py-3 text-xs text-gray-500 font-semibold">School Days</th>
+                  <th className="text-center px-4 py-3 text-xs text-gray-500 font-semibold">Present</th>
+                  <th className="text-center px-4 py-3 text-xs text-gray-500 font-semibold">Absent</th>
+                  <th className="text-center px-4 py-3 text-xs text-gray-500 font-semibold">Late</th>
+                  <th className="text-center px-4 py-3 text-xs text-gray-500 font-semibold">Attendance</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {terms.map(term => {
+                  const attended = term.present + term.late;
+                  return (
+                    <tr key={term.termId} className="hover:bg-gray-50 transition-colors">
+                      <td className="px-4 py-3">
+                        <div>
+                          <span className="font-medium text-gray-900 text-sm">{term.termName}</span>
+                          <span className="ml-2 inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-gray-100 text-gray-500">
+                            CLOSED
+                          </span>
+                        </div>
+                      </td>
+                      <td className="px-4 py-3 text-gray-500 text-xs">
+                        {formatDate(term.startDate)} — {formatDate(term.endDate)}
+                      </td>
+                      <td className="px-4 py-3 text-center">
+                        <span className="text-gray-700 font-medium">{term.totalSchoolDays}</span>
+                      </td>
+                      <td className="px-4 py-3 text-center">
+                        <CountBadge
+                          count={term.present}
+                          variant="present"
+                          onClick={() => handleDrillDown(term.termId, term.termName, 'PRESENT')}
+                          title="View present days"
+                        />
+                      </td>
+                      <td className="px-4 py-3 text-center">
+                        <CountBadge
+                          count={term.absent}
+                          variant="absent"
+                          onClick={() => handleDrillDown(term.termId, term.termName, 'ABSENT')}
+                          title="View absent days"
+                        />
+                      </td>
+                      <td className="px-4 py-3 text-center">
+                        <CountBadge
+                          count={term.late}
+                          variant="late"
+                          onClick={() => handleDrillDown(term.termId, term.termName, 'LATE')}
+                          title="View late days"
+                        />
+                      </td>
+                      <td className="px-4 py-3 text-center">
+                        <div className="flex flex-col items-center gap-1">
+                          <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold ${
+                            term.attendancePercent >= 80
+                              ? 'bg-green-100 text-green-700'
+                              : term.attendancePercent >= 60
+                              ? 'bg-yellow-100 text-yellow-700'
+                              : 'bg-red-100 text-red-700'
+                          }`}>
+                            {term.attendancePercent}%
+                          </span>
+                          <span className="text-[10px] text-gray-400">
+                            {attended}/{term.totalSchoolDays} days
+                          </span>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+
+          {/* Pagination for past terms */}
+          {closedTermsMeta.totalPages > 1 && (
+            <div className="border-t border-gray-100 px-4 py-3">
+              <PaginationBar meta={closedTermsMeta} onPageChange={setArchivePage} />
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  };
+
+  /* ---------- Render: Drill-Down Detail View ---------- */
+  const renderDrillDown = () => {
+    if (!drillDown) return null;
+
+    return (
+      <div>
+        {/* Drill-down header */}
+        <div className="flex items-center gap-3 mb-4 bg-white border border-gray-200 rounded-xl p-4 shadow-sm">
+          <button
+            onClick={closeDrillDown}
+            className="p-2 hover:bg-gray-100 rounded-lg text-gray-500 transition-colors"
+          >
+            <ArrowLeft className="w-4 h-4" />
+          </button>
+          <div className="flex-1">
+            <h3 className="text-sm font-bold text-gray-900">
+              {drillDown.termName}
+            </h3>
+            <p className="text-xs text-gray-500">
+              Showing all{' '}
+              <span className={`font-semibold ${STATUS_COLOR_MAP[drillDown.status] || 'text-gray-600'}`}>
+                {drillDown.status.toLowerCase()}
+              </span>{' '}
+              days — {detailMeta.total} record{detailMeta.total !== 1 ? 's' : ''}
+            </p>
+          </div>
+          {/* Filter chips */}
+          <div className="hidden sm:flex items-center gap-1">
+            {(['PRESENT', 'ABSENT', 'LATE'] as const).map(s => (
+              <button
+                key={s}
+                onClick={() => {
+                  setDrillDown({ ...drillDown, status: s });
+                  fetchDetail(drillDown.termId, s, 1);
+                }}
+                className={`px-3 py-1 rounded-full text-xs font-medium transition-colors ${
+                  drillDown.status === s
+                    ? s === 'PRESENT' ? 'bg-green-100 text-green-700' :
+                      s === 'ABSENT' ? 'bg-red-100 text-red-700' :
+                      'bg-yellow-100 text-yellow-700'
+                    : 'bg-gray-100 text-gray-500 hover:bg-gray-200'
+                }`}
+              >
+                {s.charAt(0) + s.slice(1).toLowerCase()}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {detailLoading ? (
+          <div className="animate-pulse space-y-3 py-4">
+            {[1, 2, 3, 4, 5].map(i => (
+              <div key={i} className="h-10 bg-gray-100 rounded" />
+            ))}
+          </div>
+        ) : detailRecords.length === 0 ? (
+          <div className="text-center py-10">
+            <div className="w-12 h-12 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-3">
+              <Calendar className="w-6 h-6 text-gray-400" />
+            </div>
+            <p className="text-gray-400 text-sm">No {drillDown.status.toLowerCase()} records found for this term.</p>
+          </div>
+        ) : (
+          <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="bg-gray-50 border-b border-gray-200">
+                    <th className="text-left px-4 py-3 text-xs text-gray-500 font-semibold w-12">#</th>
+                    <th className="text-left px-4 py-3 text-xs text-gray-500 font-semibold">Date</th>
+                    <th className="text-left px-4 py-3 text-xs text-gray-500 font-semibold">Day</th>
+                    <th className="text-left px-4 py-3 text-xs text-gray-500 font-semibold">Status</th>
+                    <th className="text-left px-4 py-3 text-xs text-gray-500 font-semibold">Notes</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100">
+                  {detailRecords.map((rec, idx) => {
+                    const d = new Date(rec.date);
+                    const dayName = d.toLocaleDateString('en-GH', { weekday: 'long' });
+                    const rowNum = (detailMeta.page - 1) * detailMeta.limit + idx + 1;
+                    return (
+                      <tr key={rec.id} className="hover:bg-gray-50 transition-colors">
+                        <td className="px-4 py-3 text-gray-400 text-xs font-mono">{rowNum}</td>
+                        <td className="px-4 py-3 text-gray-700 font-medium">{formatDate(rec.date)}</td>
+                        <td className="px-4 py-3 text-gray-500">{dayName}</td>
+                        <td className="px-4 py-3">
+                          <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                            rec.status === 'PRESENT' ? 'bg-green-100 text-green-700' :
+                            rec.status === 'LATE' ? 'bg-yellow-100 text-yellow-700' :
+                            'bg-red-100 text-red-700'
+                          }`}>
+                            {rec.status === 'PRESENT' && <CheckCircle2 className="w-3 h-3" />}
+                            {rec.status === 'ABSENT' && <XCircle className="w-3 h-3" />}
+                            {rec.status === 'LATE' && <Clock className="w-3 h-3" />}
+                            {rec.status}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3 text-gray-500 text-xs">{rec.notes || '—'}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Pagination */}
+            <div className="border-t border-gray-100 px-4 py-2">
+              <PaginationBar meta={detailMeta} onPageChange={handleDetailPageChange} />
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  };
 
   return (
     <div className="p-8 max-w-4xl">
@@ -291,222 +726,39 @@ export default function StudentDetailPage() {
         {activeTab === 'attendance' && !drillDown && (
           <div>
             {attendanceLoading ? (
-              <div className="animate-pulse space-y-3 py-4">
-                {[1, 2, 3].map(i => (
-                  <div key={i} className="h-12 bg-gray-100 rounded" />
+              <div className="animate-pulse space-y-4 py-4">
+                <div className="h-48 bg-gray-100 rounded-xl" />
+                <div className="h-8 bg-gray-100 rounded w-40" />
+                {[1, 2].map(i => (
+                  <div key={i} className="h-14 bg-gray-100 rounded" />
                 ))}
               </div>
             ) : termSummaries.length === 0 ? (
-              <p className="text-gray-400 text-sm py-4">No attendance records found.</p>
-            ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="bg-gray-50 border-b">
-                      <th className="text-left px-4 py-3 text-xs text-gray-400 font-medium">Term</th>
-                      <th className="text-left px-4 py-3 text-xs text-gray-400 font-medium">Period</th>
-                      <th className="text-left px-4 py-3 text-xs text-gray-400 font-medium">Status</th>
-                      <th className="text-center px-4 py-3 text-xs text-gray-400 font-medium">School Days</th>
-                      <th className="text-center px-4 py-3 text-xs text-gray-400 font-medium">Present</th>
-                      <th className="text-center px-4 py-3 text-xs text-gray-400 font-medium">Absent</th>
-                      <th className="text-center px-4 py-3 text-xs text-gray-400 font-medium">Late</th>
-                      <th className="text-center px-4 py-3 text-xs text-gray-400 font-medium">Attendance</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-gray-100">
-                    {termSummaries.map(term => (
-                      <tr key={term.termId} className="hover:bg-gray-50">
-                        <td className="px-4 py-3 font-medium text-gray-900">{term.termName}</td>
-                        <td className="px-4 py-3 text-gray-500 text-xs">
-                          {formatDate(term.startDate)} — {formatDate(term.endDate)}
-                        </td>
-                        <td className="px-4 py-3">
-                          <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
-                            term.status === 'ACTIVE'
-                              ? 'bg-green-100 text-green-700'
-                              : 'bg-gray-100 text-gray-600'
-                          }`}>
-                            {term.status}
-                          </span>
-                        </td>
-                        <td className="px-4 py-3 text-center text-gray-700 font-medium">{term.totalSchoolDays}</td>
-                        <td className="px-4 py-3 text-center">
-                          <button
-                            onClick={() => handleDrillDown(term.termId, term.termName, 'PRESENT')}
-                            className="inline-flex items-center justify-center min-w-[2.5rem] px-2 py-1 rounded-md text-xs font-semibold bg-green-50 text-green-700 hover:bg-green-100 transition-colors cursor-pointer"
-                            title="View present days"
-                          >
-                            {term.present}
-                          </button>
-                        </td>
-                        <td className="px-4 py-3 text-center">
-                          <button
-                            onClick={() => handleDrillDown(term.termId, term.termName, 'ABSENT')}
-                            className="inline-flex items-center justify-center min-w-[2.5rem] px-2 py-1 rounded-md text-xs font-semibold bg-red-50 text-red-700 hover:bg-red-100 transition-colors cursor-pointer"
-                            title="View absent days"
-                          >
-                            {term.absent}
-                          </button>
-                        </td>
-                        <td className="px-4 py-3 text-center">
-                          <button
-                            onClick={() => handleDrillDown(term.termId, term.termName, 'LATE')}
-                            className="inline-flex items-center justify-center min-w-[2.5rem] px-2 py-1 rounded-md text-xs font-semibold bg-yellow-50 text-yellow-700 hover:bg-yellow-100 transition-colors cursor-pointer"
-                            title="View late days"
-                          >
-                            {term.late}
-                          </button>
-                        </td>
-                        <td className="px-4 py-3 text-center">
-                          <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold ${
-                            term.attendancePercent >= 80
-                              ? 'bg-green-100 text-green-700'
-                              : term.attendancePercent >= 60
-                              ? 'bg-yellow-100 text-yellow-700'
-                              : 'bg-red-100 text-red-700'
-                          }`}>
-                            {term.attendancePercent}%
-                          </span>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </div>
-        )}
-
-        {activeTab === 'attendance' && drillDown && (
-          <div>
-            {/* Drill-down header */}
-            <div className="flex items-center gap-3 mb-4">
-              <button
-                onClick={closeDrillDown}
-                className="p-1.5 hover:bg-gray-100 rounded-lg text-gray-500 transition-colors"
-              >
-                <ArrowLeft className="w-4 h-4" />
-              </button>
-              <div>
-                <h3 className="text-sm font-semibold text-gray-900">
-                  {drillDown.termName}
-                </h3>
-                <p className="text-xs text-gray-500">
-                  Showing all{' '}
-                  <span className={`font-semibold ${
-                    drillDown.status === 'PRESENT' ? 'text-green-600' :
-                    drillDown.status === 'ABSENT' ? 'text-red-600' :
-                    'text-yellow-600'
-                  }`}>
-                    {drillDown.status.toLowerCase()}
-                  </span>{' '}
-                  days — {detailMeta.total} record{detailMeta.total !== 1 ? 's' : ''}
-                </p>
-              </div>
-            </div>
-
-            {detailLoading ? (
-              <div className="animate-pulse space-y-3 py-4">
-                {[1, 2, 3, 4, 5].map(i => (
-                  <div key={i} className="h-10 bg-gray-100 rounded" />
-                ))}
-              </div>
-            ) : detailRecords.length === 0 ? (
-              <p className="text-gray-400 text-sm py-4">No records found.</p>
-            ) : (
-              <>
-                <div className="overflow-x-auto">
-                  <table className="w-full text-sm">
-                    <thead>
-                      <tr className="bg-gray-50 border-b">
-                        <th className="text-left px-4 py-3 text-xs text-gray-400 font-medium w-8">#</th>
-                        <th className="text-left px-4 py-3 text-xs text-gray-400 font-medium">Date</th>
-                        <th className="text-left px-4 py-3 text-xs text-gray-400 font-medium">Day</th>
-                        <th className="text-left px-4 py-3 text-xs text-gray-400 font-medium">Status</th>
-                        <th className="text-left px-4 py-3 text-xs text-gray-400 font-medium">Notes</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-gray-100">
-                      {detailRecords.map((rec, idx) => {
-                        const d = new Date(rec.date);
-                        const dayName = d.toLocaleDateString('en-GH', { weekday: 'long' });
-                        const rowNum = (detailMeta.page - 1) * detailMeta.limit + idx + 1;
-                        return (
-                          <tr key={rec.id} className="hover:bg-gray-50">
-                            <td className="px-4 py-3 text-gray-400 text-xs">{rowNum}</td>
-                            <td className="px-4 py-3 text-gray-700">{formatDate(rec.date)}</td>
-                            <td className="px-4 py-3 text-gray-500">{dayName}</td>
-                            <td className="px-4 py-3">
-                              <span className={`px-2.5 py-0.5 rounded-full text-xs font-medium ${
-                                rec.status === 'PRESENT' ? 'bg-green-100 text-green-700' :
-                                rec.status === 'LATE' ? 'bg-yellow-100 text-yellow-700' :
-                                'bg-red-100 text-red-700'
-                              }`}>
-                                {rec.status}
-                              </span>
-                            </td>
-                            <td className="px-4 py-3 text-gray-500">{rec.notes || '—'}</td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
+              <div className="text-center py-12">
+                <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                  <Calendar className="w-8 h-8 text-gray-300" />
                 </div>
+                <p className="text-gray-400 text-sm">No attendance records found.</p>
+                <p className="text-gray-300 text-xs mt-1">Attendance will appear here once terms are created and attendance is marked.</p>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {/* Active term progress card */}
+                {activeTerm && renderActiveTermCard(activeTerm)}
 
-                {/* Pagination */}
-                {detailMeta.totalPages > 1 && (
-                  <div className="flex items-center justify-between mt-4 px-2">
-                    <p className="text-xs text-gray-500">
-                      Showing {(detailMeta.page - 1) * detailMeta.limit + 1}–{Math.min(detailMeta.page * detailMeta.limit, detailMeta.total)} of {detailMeta.total}
-                    </p>
-                    <div className="flex items-center gap-1">
-                      <button
-                        onClick={() => handleDetailPageChange(detailMeta.page - 1)}
-                        disabled={detailMeta.page <= 1}
-                        className="p-1.5 rounded-md hover:bg-gray-100 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
-                      >
-                        <ChevronLeft className="w-4 h-4" />
-                      </button>
-                      {Array.from({ length: detailMeta.totalPages }, (_, i) => i + 1)
-                        .filter(p => p === 1 || p === detailMeta.totalPages || Math.abs(p - detailMeta.page) <= 1)
-                        .reduce<(number | string)[]>((acc, p, i, arr) => {
-                          if (i > 0 && typeof arr[i - 1] === 'number' && (p as number) - (arr[i - 1] as number) > 1) {
-                            acc.push('...');
-                          }
-                          acc.push(p);
-                          return acc;
-                        }, [])
-                        .map((p, i) =>
-                          typeof p === 'string' ? (
-                            <span key={`ellipsis-${i}`} className="px-2 text-xs text-gray-400">…</span>
-                          ) : (
-                            <button
-                              key={p}
-                              onClick={() => handleDetailPageChange(p)}
-                              className={`w-8 h-8 rounded-md text-xs font-medium transition-colors ${
-                                p === detailMeta.page
-                                  ? 'bg-[#16a34a] text-white'
-                                  : 'hover:bg-gray-100 text-gray-600'
-                              }`}
-                            >
-                              {p}
-                            </button>
-                          )
-                        )}
-                      <button
-                        onClick={() => handleDetailPageChange(detailMeta.page + 1)}
-                        disabled={detailMeta.page >= detailMeta.totalPages}
-                        className="p-1.5 rounded-md hover:bg-gray-100 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
-                      >
-                        <ChevronRight className="w-4 h-4" />
-                      </button>
-                    </div>
-                  </div>
+                {/* Past terms archive table */}
+                {renderPastTermsTable(pagedClosedTerms)}
+
+                {/* Edge case: no active term but has data */}
+                {!activeTerm && closedTerms.length === 0 && (
+                  <p className="text-gray-400 text-sm py-4">No attendance data available.</p>
                 )}
-              </>
+              </div>
             )}
           </div>
         )}
+
+        {activeTab === 'attendance' && drillDown && renderDrillDown()}
       </div>
 
       <RecordPaymentModal
