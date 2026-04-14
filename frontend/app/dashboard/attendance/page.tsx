@@ -76,10 +76,10 @@ export default function AttendancePage() {
   const isHeadmistress = user?.role === 'HEADMISTRESS';
   const isReadOnly = isTermClosed || isDayClosed || (isDayOver && !isHeadmistress);
 
-  // Check if it's after 3 PM
+  // Check if it's after 3 PM (Ghana time = UTC)
   const isAfter3PM = () => {
     const now = new Date();
-    return now.getHours() >= 15;
+    return now.getUTCHours() >= 15;
   };
 
   // Get current day name and date for display

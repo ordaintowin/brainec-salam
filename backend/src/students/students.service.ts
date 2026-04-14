@@ -169,13 +169,14 @@ export class StudentsService {
    * Count weekdays (Mon-Fri) between two dates inclusive.
    * Uses millisecond-based day stepping to avoid any Date mutation edge cases.
    */
+  private static readonly MS_PER_DAY = 86_400_000;
+
   private countWeekdays(start: Date, end: Date): number {
     let count = 0;
     const startMs = new Date(start).setUTCHours(0, 0, 0, 0);
     const endMs = new Date(end).setUTCHours(0, 0, 0, 0);
-    const oneDay = 86_400_000; // 24 * 60 * 60 * 1000
 
-    for (let ms = startMs; ms <= endMs; ms += oneDay) {
+    for (let ms = startMs; ms <= endMs; ms += StudentsService.MS_PER_DAY) {
       const day = new Date(ms).getUTCDay();
       if (day >= 1 && day <= 5) count++;
     }

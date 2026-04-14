@@ -10,6 +10,7 @@ import {
 export class AttendanceService {
   constructor(private prisma: PrismaService) {}
 
+  private static readonly MS_PER_DAY = 86_400_000;
   /** Find the active term that covers the given date, if any */
   private async getTermForDate(date: Date) {
     return this.prisma.term.findFirst({
@@ -209,12 +210,12 @@ export class AttendanceService {
     const today = new Date();
     today.setUTCHours(0, 0, 0, 0);
 
-    // Allow closing for today only after 3 PM (unless closing a past day)
+    // Allow closing for today only after 3 PM
+    // Ghana timezone is GMT (UTC+0), so UTC hours match local time
     if (date.getTime() === today.getTime()) {
       const now = new Date();
       const currentHour = now.getUTCHours();
-      // 3 PM UTC — in practice the frontend sends the request based on local time.
-      // We allow headmistress to close anytime.
+      // Headmistress can close at any time
       if (currentHour < 15 && userRole !== 'HEADMISTRESS') {
         throw new BadRequestException(
           'Attendance can only be closed after 3:00 PM',
@@ -394,7 +395,7 @@ export class AttendanceService {
       const holidays = activeTerm.termDays.filter((d) => d.isHoliday);
 
       const durationMs = new Date(activeTerm.endDate).getTime() - new Date(activeTerm.startDate).getTime();
-      const durationDays = Math.ceil(durationMs / 86_400_000) + 1;
+      const durationDays = Math.ceil(durationMs / AttendanceService.MS_PER_DAY) + 1;
 
       const termStatusCounts = countStatuses(termRecords);
       const presentAndLate = termStatusCounts.present + termStatusCounts.late;

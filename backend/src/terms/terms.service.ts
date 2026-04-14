@@ -10,15 +10,16 @@ import { CreateTermDto, UpdateTermDto } from './dto/terms.dto';
 export class TermsService {
   constructor(private prisma: PrismaService) {}
 
+  private static readonly MS_PER_DAY = 86_400_000;
+
   /**
    * Compute weekday dates (Mon-Fri) between start and end (inclusive).
    */
   private getWeekdays(start: Date, end: Date): Date[] {
     const days: Date[] = [];
-    const oneDay = 86_400_000;
     const startMs = new Date(start).setUTCHours(0, 0, 0, 0);
     const endMs = new Date(end).setUTCHours(0, 0, 0, 0);
-    for (let ms = startMs; ms <= endMs; ms += oneDay) {
+    for (let ms = startMs; ms <= endMs; ms += TermsService.MS_PER_DAY) {
       const d = new Date(ms);
       const day = d.getUTCDay();
       if (day >= 1 && day <= 5) {
@@ -222,7 +223,7 @@ export class TermsService {
 
     // Duration in days (calendar days)
     const durationMs = new Date(term.endDate).getTime() - new Date(term.startDate).getTime();
-    const durationDays = Math.ceil(durationMs / 86_400_000) + 1;
+    const durationDays = Math.ceil(durationMs / TermsService.MS_PER_DAY) + 1;
 
     return {
       term: {
