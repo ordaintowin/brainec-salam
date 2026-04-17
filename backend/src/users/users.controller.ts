@@ -3,6 +3,7 @@ import {
   Get,
   Post,
   Patch,
+  Delete,
   Body,
   Param,
   Query,
@@ -42,7 +43,7 @@ export class UsersController {
   }
 
   @Patch(':id')
-  @Roles(Role.HEADMISTRESS, Role.ADMIN)
+  @Roles(Role.HEADMISTRESS)
   update(@Param('id') id: string, @Body() dto: UpdateUserDto) {
     return this.usersService.update(id, dto);
   }
@@ -51,5 +52,11 @@ export class UsersController {
   @Roles(Role.HEADMISTRESS)
   toggle(@Param('id') id: string) {
     return this.usersService.toggleActive(id);
+  }
+
+  @Delete(':id')
+  @Roles(Role.HEADMISTRESS)
+  remove(@Param('id') id: string) {
+    return this.usersService.delete(id);
   }
 }

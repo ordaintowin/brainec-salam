@@ -32,6 +32,11 @@ export class TermsController {
     return this.termsService.findActive();
   }
 
+  @Get('closed-summary')
+  getClosedTermsSummary() {
+    return this.termsService.getClosedTermsSummary();
+  }
+
   @Get(':id')
   findOne(@Param('id') id: string) {
     return this.termsService.findOne(id);

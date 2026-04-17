@@ -86,6 +86,41 @@ export class TermsService {
     return this.findOne(term.id);
   }
 
+  /**
+   * Return closed terms with school-day count (Mon–Fri weekdays only) and
+   * unique student count (students with at least one attendance record).
+   */
+  async getClosedTermsSummary() {
+    const terms = await this.prisma.term.findMany({
+      where: { status: 'CLOSED' },
+      orderBy: { startDate: 'desc' },
+      include: {
+        _count: { select: { termDays: true } },
+      },
+    });
+
+    return Promise.all(
+      terms.map(async (term) => {
+        const uniqueStudents = await this.prisma.attendance.findMany({
+          where: { termId: term.id },
+          select: { studentId: true },
+          distinct: ['studentId'],
+        });
+
+        return {
+          id: term.id,
+          name: term.name,
+          startDate: term.startDate,
+          endDate: term.endDate,
+          status: term.status,
+          closedAt: term.closedAt,
+          schoolDays: term._count.termDays,
+          studentCount: uniqueStudents.length,
+        };
+      }),
+    );
+  }
+
   async findAll() {
     return this.prisma.term.findMany({
       orderBy: { startDate: 'desc' },
@@ -125,12 +160,63 @@ export class TermsService {
       throw new BadRequestException('Cannot update a closed term');
     }
 
+    const newStart = dto.startDate ? new Date(dto.startDate) : new Date(term.startDate);
+    const newEnd = dto.endDate ? new Date(dto.endDate) : new Date(term.endDate);
+
+    if (newEnd <= newStart) {
+      throw new BadRequestException('End date must be after start date');
+    }
+
     const data: any = {};
     if (dto.name) data.name = dto.name;
-    if (dto.startDate) data.startDate = new Date(dto.startDate);
-    if (dto.endDate) data.endDate = new Date(dto.endDate);
+    if (dto.startDate) data.startDate = newStart;
+    if (dto.endDate) data.endDate = newEnd;
 
-    return this.prisma.term.update({ where: { id }, data });
+    await this.prisma.term.update({ where: { id }, data });
+
+    // Regenerate TermDays whenever dates change, preserving existing holiday labels
+    // within the new range.
+    if (dto.startDate || dto.endDate) {
+      const newWeekdays = this.getWeekdays(newStart, newEnd);
+      const newDayMs = new Set(newWeekdays.map((d) => d.getTime()));
+
+      // Remove TermDays that fall outside the new range
+      await this.prisma.termDay.deleteMany({
+        where: {
+          termId: id,
+          OR: [{ date: { lt: newStart } }, { date: { gt: newEnd } }],
+        },
+      });
+
+      // Find TermDays still in range (may have custom holiday labels we want to keep)
+      const remaining = await this.prisma.termDay.findMany({
+        where: { termId: id },
+        select: { date: true },
+      });
+      const existingMs = new Set(remaining.map((d) => new Date(d.date).getTime()));
+
+      // Create TermDays for new weekdays not yet covered
+      const toCreate = newWeekdays.filter((d) => !existingMs.has(d.getTime()));
+      if (toCreate.length > 0) {
+        await this.prisma.termDay.createMany({
+          data: toCreate.map((date) => ({ termId: id, date, isHoliday: false })),
+        });
+      }
+
+      // Remove any non-weekday days that may exist (shouldn't normally happen)
+      const allRemaining = await this.prisma.termDay.findMany({
+        where: { termId: id },
+        select: { id: true, date: true },
+      });
+      const toDelete = allRemaining.filter((d) => !newDayMs.has(new Date(d.date).getTime()));
+      if (toDelete.length > 0) {
+        await this.prisma.termDay.deleteMany({
+          where: { id: { in: toDelete.map((d) => d.id) } },
+        });
+      }
+    }
+
+    return this.findOne(id);
   }
 
   async close(id: string, closedById: string) {

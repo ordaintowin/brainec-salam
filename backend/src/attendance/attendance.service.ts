@@ -11,6 +11,19 @@ export class AttendanceService {
   constructor(private prisma: PrismaService) {}
 
   private static readonly MS_PER_DAY = 86_400_000;
+
+  /** Count Mon–Fri weekdays in [start, end] inclusive */
+  private countWeekdays(start: Date, end: Date): number {
+    let count = 0;
+    const startMs = new Date(start).setUTCHours(0, 0, 0, 0);
+    const endMs = new Date(end).setUTCHours(0, 0, 0, 0);
+    for (let ms = startMs; ms <= endMs; ms += AttendanceService.MS_PER_DAY) {
+      const day = new Date(ms).getUTCDay();
+      if (day >= 1 && day <= 5) count++;
+    }
+    return count;
+  }
+
   /** Find the active term that covers the given date, if any */
   private async getTermForDate(date: Date) {
     return this.prisma.term.findFirst({
@@ -44,6 +57,13 @@ export class AttendanceService {
         'Past attendance records cannot be modified',
       );
     }
+  }
+
+  private async isHolidayDate(date: Date, termId: string): Promise<boolean> {
+    const termDay = await this.prisma.termDay.findFirst({
+      where: { termId, date, isHoliday: true },
+    });
+    return !!termDay;
   }
 
   /**
@@ -96,7 +116,22 @@ export class AttendanceService {
     return null;
   }
 
-  async markAttendance(dto: MarkAttendanceDto, markedById: string, userRole = 'ADMIN') {
+  async markAttendance(dto: MarkAttendanceDto, markedById: string, user: any) {
+    if (!user?.role) {
+      throw new ForbiddenException('Unauthorized');
+    }
+    const userRole: string = user.role;
+
+    // Teachers can only mark attendance for their own class
+    if (userRole === 'TEACHER') {
+      const teacher = await this.prisma.teacher.findUnique({
+        where: { userId: markedById },
+      });
+      if (!teacher || teacher.classId !== dto.classId) {
+        throw new ForbiddenException('You can only mark attendance for your own class');
+      }
+    }
+
     const date = new Date(dto.date);
     date.setUTCHours(0, 0, 0, 0);
 
@@ -112,6 +147,9 @@ export class AttendanceService {
       throw new ForbiddenException(
         `Attendance cannot be modified — term "${term.name}" is closed`,
       );
+    }
+    if (await this.isHolidayDate(date, term.id)) {
+      throw new ForbiddenException('Attendance cannot be marked — this day is a holiday.');
     }
 
     return this.prisma.attendance.upsert({
@@ -180,6 +218,9 @@ export class AttendanceService {
       throw new ForbiddenException(
         'Attendance for this day has been closed. Only the headmistress can modify it.',
       );
+    }
+    if (await this.isHolidayDate(date, term.id)) {
+      throw new ForbiddenException('Attendance cannot be marked — this day is a holiday.');
     }
 
     const results = await Promise.all(
@@ -308,9 +349,24 @@ export class AttendanceService {
     };
   }
 
-  async update(id: string, dto: UpdateAttendanceDto, updatedById: string, userRole = 'ADMIN') {
+  async update(id: string, dto: UpdateAttendanceDto, updatedById: string, user: any) {
+    if (!user?.role) {
+      throw new ForbiddenException('Unauthorized');
+    }
+    const userRole: string = user.role;
+
     const record = await this.prisma.attendance.findUnique({ where: { id } });
     if (!record) throw new NotFoundException('Attendance record not found');
+
+    // Teachers can only edit attendance for their own class
+    if (userRole === 'TEACHER') {
+      const teacher = await this.prisma.teacher.findUnique({
+        where: { userId: updatedById },
+      });
+      if (!teacher || teacher.classId !== record.classId) {
+        throw new ForbiddenException('You can only modify attendance for your own class');
+      }
+    }
 
     // Block editing if term is closed
     await this.ensureTermNotClosed(record.termId);
@@ -400,8 +456,6 @@ export class AttendanceService {
     let termProgress = null;
     if (activeTerm) {
       const schoolDays = activeTerm.termDays.filter((d) => !d.isHoliday);
-      const daysCrossed = schoolDays.filter((d) => new Date(d.date) <= today);
-      const daysRemaining = schoolDays.filter((d) => new Date(d.date) > today);
       const holidays = activeTerm.termDays.filter((d) => d.isHoliday);
 
       const durationMs = new Date(activeTerm.endDate).getTime() - new Date(activeTerm.startDate).getTime();
@@ -411,12 +465,35 @@ export class AttendanceService {
       const presentAndLate = termStatusCounts.present + termStatusCounts.late;
       const overallPercent = termStatusCounts.total > 0 ? Math.round((presentAndLate / termStatusCounts.total) * 100) : 0;
 
+      let totalSchoolDays: number;
+      let daysCrossedCount: number;
+      let daysRemainingCount: number;
+      let totalHolidays: number;
+
+      if (schoolDays.length > 0) {
+        // Use termDays from the database (respects manually set holidays)
+        totalSchoolDays = schoolDays.length;
+        daysCrossedCount = schoolDays.filter((d) => new Date(d.date) <= today).length;
+        daysRemainingCount = schoolDays.filter((d) => new Date(d.date) > today).length;
+        totalHolidays = holidays.length;
+      } else {
+        // Fallback: term days were not generated — count Mon–Fri weekdays
+        const termEnd = new Date(activeTerm.endDate);
+        termEnd.setUTCHours(0, 0, 0, 0);
+        const endForCrossed = today <= termEnd ? today : termEnd;
+        const tomorrow = new Date(today.getTime() + AttendanceService.MS_PER_DAY);
+        totalSchoolDays = this.countWeekdays(activeTerm.startDate, activeTerm.endDate);
+        daysCrossedCount = this.countWeekdays(activeTerm.startDate, endForCrossed);
+        daysRemainingCount = today < termEnd ? this.countWeekdays(tomorrow, activeTerm.endDate) : 0;
+        totalHolidays = 0;
+      }
+
       termProgress = {
         durationDays,
-        totalSchoolDays: schoolDays.length,
-        totalHolidays: holidays.length,
-        daysCrossed: daysCrossed.length,
-        daysRemaining: daysRemaining.length,
+        totalSchoolDays,
+        totalHolidays,
+        daysCrossed: daysCrossedCount,
+        daysRemaining: daysRemainingCount,
         overallAttendancePercent: overallPercent,
       };
     }
@@ -449,7 +526,9 @@ export class AttendanceService {
     const today = new Date();
     today.setUTCHours(0, 0, 0, 0);
 
-    const where: any = { status };
+    const where: any = {
+      status: status === 'PRESENT' ? { in: ['PRESENT', 'LATE'] } : status,
+    };
     if (classId) where.classId = classId;
 
     if (scope === 'day') {
@@ -540,6 +619,59 @@ export class AttendanceService {
       scope,
       status,
       students: Object.values(studentMap).sort((a, b) => b.count - a.count),
+    };
+  }
+
+  /**
+   * Get today's attendance breakdown per class (present, absent, late, % of enrolled students)
+   */
+  async getTodayClassBreakdown() {
+    const today = new Date();
+    today.setUTCHours(0, 0, 0, 0);
+
+    const activeTerm = await this.prisma.term.findFirst({
+      where: { status: 'ACTIVE' },
+      select: { id: true, name: true },
+    });
+
+    const classes = await this.prisma.class.findMany({
+      select: { id: true, name: true },
+      orderBy: { name: 'asc' },
+    });
+
+    const results = await Promise.all(
+      classes.map(async (cls) => {
+        const studentCount = await this.prisma.student.count({
+          where: { classId: cls.id, isArchived: false },
+        });
+        const records = await this.prisma.attendance.findMany({
+          where: { classId: cls.id, date: today },
+          select: { status: true },
+        });
+        const present = records.filter((r) => r.status === 'PRESENT').length;
+        const late = records.filter((r) => r.status === 'LATE').length;
+        const absent = records.filter((r) => r.status === 'ABSENT').length;
+        const totalMarked = records.length;
+        return {
+          classId: cls.id,
+          className: cls.name,
+          studentCount,
+          present,
+          late,
+          absent,
+          totalMarked,
+          attendancePercent:
+            totalMarked > 0
+              ? Math.round(((present + late) / totalMarked) * 100)
+              : 0,
+        };
+      }),
+    );
+
+    return {
+      date: today.toISOString().split('T')[0],
+      activeTerm,
+      classes: results,
     };
   }
 

@@ -69,7 +69,7 @@ export default function ClassDetailPage() {
 
       {/* Class Info Card */}
       <div className="bg-white rounded-xl border border-gray-200 p-6 mb-6">
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div>
             <p className="text-xs text-gray-400 uppercase tracking-wider">Class Name</p>
             <p className="text-sm font-medium text-gray-800 mt-1">{cls.name}</p>

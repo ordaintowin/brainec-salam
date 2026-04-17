@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, ForbiddenException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateStudentDto, UpdateStudentDto } from './dto/student.dto';
 import { CloudinaryService } from '../common/services/cloudinary.service';
@@ -12,7 +12,7 @@ export class StudentsService {
 
   private async generateStudentId(): Promise<string> {
     const year = new Date().getFullYear();
-    const prefix = `BS-${year}-`;
+    const prefix = `BAC-${year}-`;
 
     const last = await this.prisma.student.findFirst({
       where: { studentId: { startsWith: prefix } },
@@ -42,14 +42,20 @@ export class StudentsService {
         guardianPhone: dto.guardianPhone,
         guardianEmail: dto.guardianEmail,
         guardianAddress: dto.guardianAddress,
+        secondaryGuardianName: dto.secondaryGuardianName,
+        secondaryGuardianPhone: dto.secondaryGuardianPhone,
       },
       include: { class: true },
     });
   }
 
-  async findAll(page = 1, limit = 10, q?: string) {
+  async findAll(page = 1, limit = 10, q?: string, classId?: string) {
     const skip = (page - 1) * limit;
     const where: any = { isArchived: false };
+
+    if (classId) {
+      where.classId = classId;
+    }
 
     if (q) {
       where.OR = [
@@ -79,7 +85,7 @@ export class StudentsService {
     };
   }
 
-  async findOne(id: string) {
+  async findOne(id: string, teacherClassId?: string) {
     const student = await this.prisma.student.findUnique({
       where: { id },
       include: {
@@ -95,6 +101,9 @@ export class StudentsService {
       },
     });
     if (!student) throw new NotFoundException('Student not found');
+    if (teacherClassId && student.classId !== teacherClassId) {
+      throw new ForbiddenException('You can only view students from your assigned class');
+    }
     return student;
   }
 
@@ -191,11 +200,11 @@ export class StudentsService {
     const student = await this.prisma.student.findUnique({ where: { id: studentId } });
     if (!student) throw new NotFoundException('Student not found');
 
-    // Get all terms ordered by most recent first, with their TermDays
+    // Get all terms ordered by most recent first, with their TermDays (including date for crossed/remaining calc)
     const terms = await this.prisma.term.findMany({
       orderBy: { startDate: 'desc' },
       include: {
-        termDays: { select: { isHoliday: true } },
+        termDays: { select: { isHoliday: true, date: true } },
       },
     });
 
@@ -215,18 +224,31 @@ export class StudentsService {
       else if (att.status === 'LATE') termCounts[tid].late++;
     }
 
+    const today = new Date();
+    today.setUTCHours(0, 0, 0, 0);
+
     const result = terms.map((term) => {
       const counts = termCounts[term.id] || { present: 0, absent: 0, late: 0 };
 
-      // Use TermDay records if available, otherwise fall back to weekday calculation
       let totalSchoolDays: number;
+      let daysCrossed: number;
+      let daysRemaining: number;
+
       if (term.termDays && term.termDays.length > 0) {
-        totalSchoolDays = term.termDays.filter((d) => !d.isHoliday).length;
+        // Use TermDay records — respects manually configured holidays
+        const schoolDayDates = term.termDays.filter((d) => !d.isHoliday);
+        totalSchoolDays = schoolDayDates.length;
+        daysCrossed = schoolDayDates.filter((d) => new Date(d.date) <= today).length;
+        daysRemaining = schoolDayDates.filter((d) => new Date(d.date) > today).length;
       } else {
-        const today = new Date();
-        today.setUTCHours(0, 0, 0, 0);
-        const endForCount = term.status === 'CLOSED' || term.endDate <= today ? term.endDate : today;
-        totalSchoolDays = this.countWeekdays(term.startDate, endForCount);
+        // Fallback: count Mon–Fri weekdays across the FULL term (not just up to today)
+        const termEnd = new Date(term.endDate);
+        termEnd.setUTCHours(0, 0, 0, 0);
+        const endForCrossed = today <= termEnd ? today : termEnd;
+        const tomorrow = new Date(today.getTime() + StudentsService.MS_PER_DAY);
+        totalSchoolDays = this.countWeekdays(term.startDate, term.endDate);
+        daysCrossed = this.countWeekdays(term.startDate, endForCrossed);
+        daysRemaining = today < termEnd ? this.countWeekdays(tomorrow, term.endDate) : 0;
       }
 
       const totalMarked = counts.present + counts.absent + counts.late;
@@ -238,6 +260,8 @@ export class StudentsService {
         startDate: term.startDate,
         endDate: term.endDate,
         totalSchoolDays,
+        daysCrossed,
+        daysRemaining,
         present: counts.present,
         absent: counts.absent,
         late: counts.late,

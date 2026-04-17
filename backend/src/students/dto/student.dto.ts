@@ -40,6 +40,14 @@ export class CreateStudentDto {
   @IsString()
   @IsOptional()
   guardianAddress?: string;
+
+  @IsString()
+  @IsOptional()
+  secondaryGuardianName?: string;
+
+  @IsString()
+  @IsOptional()
+  secondaryGuardianPhone?: string;
 }
 
 export class UpdateStudentDto {
@@ -78,6 +86,14 @@ export class UpdateStudentDto {
   @IsString()
   @IsOptional()
   guardianAddress?: string;
+
+  @IsString()
+  @IsOptional()
+  secondaryGuardianName?: string;
+
+  @IsString()
+  @IsOptional()
+  secondaryGuardianPhone?: string;
 }
 
 export class ArchiveStudentDto {

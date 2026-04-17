@@ -20,6 +20,12 @@ enum PaymentStatus {
   OVERDUE
 }
 
+enum FeeOrderType {
+  CLASS
+  INDIVIDUAL
+  ALL
+}
+
 enum AttendanceStatus {
   PRESENT
   ABSENT
@@ -137,6 +143,8 @@ model Student {
   guardianPhone   String
   guardianEmail   String?
   guardianAddress String?
+  secondaryGuardianName  String?
+  secondaryGuardianPhone String?
   enrollmentDate  DateTime     @default(now())
   isArchived      Boolean      @default(false)
   archivedAt      DateTime?
@@ -157,9 +165,12 @@ model FeeOrder {
   description String?
   amount      Decimal      @db.Decimal(10, 2)
   dueDate     DateTime
+  type        FeeOrderType @default(ALL)
   classId     String?
   class       Class?       @relation(fields: [classId], references: [id])
   createdById String
+  isArchived  Boolean      @default(false)
+  archivedAt  DateTime?
   createdAt   DateTime     @default(now())
   updatedAt   DateTime     @updatedAt
   invoices    FeeInvoice[]

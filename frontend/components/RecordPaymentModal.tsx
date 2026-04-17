@@ -6,15 +6,24 @@ import { z } from 'zod';
 import { X, Loader2 } from 'lucide-react';
 import api from '@/lib/api';
 
-const schema = z.object({
-  amount: z.string().min(1, 'Amount is required').refine(v => !isNaN(parseFloat(v)) && parseFloat(v) > 0, 'Must be positive'),
+/** Tolerance used when comparing floating-point amounts to avoid false overpayment errors */
+const FLOAT_EPSILON = 0.001;
+
+const buildSchema = (balance: number) => z.object({
+  amount: z.string().min(1, 'Amount is required').refine(
+    v => !isNaN(parseFloat(v)) && parseFloat(v) > 0,
+    'Must be positive',
+  ).refine(
+    v => parseFloat(v) <= balance + FLOAT_EPSILON,
+    `Cannot exceed the outstanding balance of ₵${Number(balance).toFixed(2)}`,
+  ),
   method: z.enum(['CASH', 'BANK_TRANSFER', 'MOBILE_MONEY']),
   reference: z.string().optional(),
   paidBy: z.string().min(1, 'Paid by is required'),
   notes: z.string().optional(),
 });
 
-type FormData = z.infer<typeof schema>;
+type FormData = z.infer<ReturnType<typeof buildSchema>>;
 
 interface RecordPaymentModalProps {
   isOpen: boolean;
@@ -33,13 +42,16 @@ export default function RecordPaymentModal({
   balance,
   onSuccess,
 }: RecordPaymentModalProps) {
+  // Coerce to plain number to guard against Prisma Decimal objects
+  const numericBalance = Number(balance);
+
   const [error, setError] = useState('');
   const {
     register,
     handleSubmit,
     reset,
     formState: { errors, isSubmitting },
-  } = useForm<FormData>({ resolver: zodResolver(schema) });
+  } = useForm<FormData>({ resolver: zodResolver(buildSchema(numericBalance)) });
 
   if (!isOpen) return null;
 
@@ -82,8 +94,7 @@ export default function RecordPaymentModal({
         </div>
 
         <p className="text-sm text-gray-500 mb-4">
-          Outstanding balance: <span className="font-semibold text-gray-800">₵{Number(balance).toFixed(2)}</span>
-          {balance > 0 && <span className="ml-2 text-xs text-blue-600">Any overpayment will be carried forward to the next invoice.</span>}
+          Outstanding balance: <span className="font-semibold text-gray-800">₵{numericBalance.toFixed(2)}</span>
         </p>
 
         {error && (
@@ -99,6 +110,7 @@ export default function RecordPaymentModal({
               type="number"
               step="0.01"
               min="0.01"
+              max={numericBalance}
               {...register('amount')}
               className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#16a34a]"
             />

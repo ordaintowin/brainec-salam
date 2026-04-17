@@ -9,7 +9,7 @@ import {
   DefaultValuePipe,
 } from '@nestjs/common';
 import { FinanceService } from './finance.service';
-import { CreateFeeOrderDto, RecordPaymentDto } from './dto/finance.dto';
+import { CreateFeeOrderDto, RecordPaymentDto, BulkPaymentDto } from './dto/finance.dto';
 import { Roles } from '../common/decorators/roles.decorator';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { Role } from '@prisma/client';
@@ -33,6 +33,15 @@ export class FinanceController {
     return this.financeService.getFeeOrders(page, limit, q);
   }
 
+  @Get('fee-orders/archived')
+  getArchivedFeeOrders(
+    @Query('page', new DefaultValuePipe(1), ParseIntPipe) page: number,
+    @Query('limit', new DefaultValuePipe(10), ParseIntPipe) limit: number,
+    @Query('q') q?: string,
+  ) {
+    return this.financeService.getArchivedFeeOrders(page, limit, q);
+  }
+
   @Get('invoices')
   getInvoices(
     @Query('page', new DefaultValuePipe(1), ParseIntPipe) page: number,
@@ -53,12 +62,19 @@ export class FinanceController {
     return this.financeService.recordPayment(dto, user.id);
   }
 
+  @Post('bulk-payments')
+  @Roles(Role.HEADMISTRESS, Role.ADMIN)
+  bulkPayment(@Body() dto: BulkPaymentDto, @CurrentUser() user: any) {
+    return this.financeService.bulkPayment(dto, user.id);
+  }
+
   @Get('payments')
   getPayments(
     @Query('page', new DefaultValuePipe(1), ParseIntPipe) page: number,
     @Query('limit', new DefaultValuePipe(10), ParseIntPipe) limit: number,
+    @Query('q') q?: string,
   ) {
-    return this.financeService.getPayments(page, limit);
+    return this.financeService.getPayments(page, limit, q);
   }
 
   @Get('fee-orders/:id/summary')

@@ -47,6 +47,12 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
         role: true,
         photoUrl: true,
         isActive: true,
+        teacher: {
+          select: {
+            id: true,
+            classId: true,
+          },
+        },
       },
     });
     if (!user || !user.isActive) {

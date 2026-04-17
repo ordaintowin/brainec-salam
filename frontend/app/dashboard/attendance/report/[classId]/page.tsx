@@ -26,6 +26,8 @@ interface ClassReport {
   students: StudentReport[];
 }
 
+const getAttendedCount = (present: number, late: number) => present + late;
+
 export default function ClassReportPage() {
   const params = useParams();
   const router = useRouter();
@@ -53,7 +55,7 @@ export default function ClassReportPage() {
       report.students.map((row) => ({
         'Student Name': `${row.student.firstName} ${row.student.lastName}`,
         'Student ID': row.student.studentId,
-        'Present': row.present,
+        'Attended': getAttendedCount(row.present, row.late),
         'Absent': row.absent,
         'Late': row.late,
         'Total Days': row.total,
@@ -120,16 +122,16 @@ export default function ClassReportPage() {
 
       {/* Summary Cards */}
       {report.students.length > 0 && (() => {
-        const totP = report.students.reduce((s, r) => s + r.present, 0);
+        const totP = report.students.reduce((s, r) => s + getAttendedCount(r.present, r.late), 0);
         const totA = report.students.reduce((s, r) => s + r.absent, 0);
         const totL = report.students.reduce((s, r) => s + r.late, 0);
         const avg = report.students.length > 0
           ? Math.round(report.students.reduce((s, r) => s + r.attendancePercent, 0) / report.students.length)
           : 0;
         return (
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3 mb-6">
             <div className="bg-white rounded-lg border border-gray-200 p-4 text-center">
-              <p className="text-xs text-gray-400 uppercase">Total Present</p>
+              <p className="text-xs text-gray-400 uppercase">Total Attended</p>
               <p className="text-xl font-bold text-green-700">{totP}</p>
             </div>
             <div className="bg-white rounded-lg border border-gray-200 p-4 text-center">
@@ -159,7 +161,7 @@ export default function ClassReportPage() {
                 <th className="text-left px-4 py-3 text-xs text-gray-400 font-medium uppercase">#</th>
                 <th className="text-left px-4 py-3 text-xs text-gray-400 font-medium uppercase">Student</th>
                 <th className="text-left px-4 py-3 text-xs text-gray-400 font-medium uppercase">ID</th>
-                <th className="text-center px-4 py-3 text-xs text-gray-400 font-medium uppercase">Present</th>
+                <th className="text-center px-4 py-3 text-xs text-gray-400 font-medium uppercase">Attended</th>
                 <th className="text-center px-4 py-3 text-xs text-gray-400 font-medium uppercase">Absent</th>
                 <th className="text-center px-4 py-3 text-xs text-gray-400 font-medium uppercase">Late</th>
                 <th className="text-center px-4 py-3 text-xs text-gray-400 font-medium uppercase">Total</th>
@@ -172,7 +174,7 @@ export default function ClassReportPage() {
                   <td className="px-4 py-3 text-gray-400">{idx + 1}</td>
                   <td className="px-4 py-3 font-medium text-gray-800">{row.student.firstName} {row.student.lastName}</td>
                   <td className="px-4 py-3 text-gray-500 font-mono text-xs">{row.student.studentId}</td>
-                  <td className="px-4 py-3 text-center text-green-700 font-medium">{row.present}</td>
+                  <td className="px-4 py-3 text-center text-green-700 font-medium">{getAttendedCount(row.present, row.late)}</td>
                   <td className="px-4 py-3 text-center text-red-600 font-medium">{row.absent}</td>
                   <td className="px-4 py-3 text-center text-yellow-600 font-medium">{row.late}</td>
                   <td className="px-4 py-3 text-center text-gray-700">{row.total}</td>

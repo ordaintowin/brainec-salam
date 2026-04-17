@@ -2,6 +2,7 @@ import {
   Injectable,
   ConflictException,
   NotFoundException,
+  ForbiddenException,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateUserDto, UpdateUserDto } from './dto/user.dto';
@@ -122,5 +123,15 @@ export class UsersService {
         isActive: true,
       },
     });
+  }
+
+  async delete(id: string) {
+    const user = await this.prisma.user.findUnique({ where: { id } });
+    if (!user) throw new NotFoundException('User not found');
+    if (user.role === Role.HEADMISTRESS) {
+      throw new ForbiddenException('Cannot delete a HEADMISTRESS account');
+    }
+    await this.prisma.user.delete({ where: { id } });
+    return { message: 'User deleted successfully' };
   }
 }

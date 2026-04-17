@@ -92,7 +92,7 @@ export default function DashboardPage() {
       <div className="p-8">
         <div className="animate-pulse space-y-4">
           <div className="h-8 bg-gray-200 rounded w-48" />
-          <div className="grid grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
             {[...Array(3)].map((_, i) => <div key={i} className="h-28 bg-gray-200 rounded-xl" />)}
           </div>
         </div>
@@ -118,7 +118,7 @@ export default function DashboardPage() {
               <p className="text-gray-500 text-sm">{teacherData.studentCount} students enrolled</p>
             </div>
 
-            <div className="grid grid-cols-3 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
               <StatCard title="Present Today" value={teacherData.todayPresent} icon={ClipboardCheck} color="#16a34a" />
               <StatCard title="Absent Today" value={teacherData.todayAbsent} icon={ClipboardCheck} color="#dc2626" />
               <StatCard title="Late Today" value={teacherData.todayLate} icon={ClipboardCheck} color="#d97706" />
@@ -167,11 +167,7 @@ export default function DashboardPage() {
               {formatDate(activeTerm.startDate)} — {formatDate(activeTerm.endDate)}
             </p>
             {activeTerm.termProgress && (
-              <div className="grid grid-cols-3 md:grid-cols-6 gap-2">
-                <div className="bg-white rounded-lg p-2 text-center border border-green-100">
-                  <p className="text-[10px] text-gray-400 uppercase">Duration</p>
-                  <p className="text-xs font-bold text-gray-800">{activeTerm.termProgress.durationDays}d</p>
-                </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
                 <div className="bg-white rounded-lg p-2 text-center border border-green-100">
                   <p className="text-[10px] text-gray-400 uppercase">School Days</p>
                   <p className="text-xs font-bold text-gray-800">{activeTerm.termProgress.totalSchoolDays}</p>
@@ -183,19 +179,6 @@ export default function DashboardPage() {
                 <div className="bg-white rounded-lg p-2 text-center border border-green-100">
                   <p className="text-[10px] text-gray-400 uppercase">Remaining</p>
                   <p className="text-xs font-bold text-blue-700">{activeTerm.termProgress.daysRemaining}</p>
-                </div>
-                <div className="bg-white rounded-lg p-2 text-center border border-green-100">
-                  <p className="text-[10px] text-gray-400 uppercase">Holidays</p>
-                  <p className="text-xs font-bold text-orange-600">{activeTerm.termProgress.totalHolidays}</p>
-                </div>
-                <div className="bg-white rounded-lg p-2 text-center border border-green-100">
-                  <p className="text-[10px] text-gray-400 uppercase">Attendance</p>
-                  <p className={`text-xs font-bold ${
-                    activeTerm.termProgress.overallAttendancePercent >= 80 ? 'text-green-700' :
-                    activeTerm.termProgress.overallAttendancePercent >= 60 ? 'text-yellow-600' : 'text-red-600'
-                  }`}>
-                    {activeTerm.termProgress.overallAttendancePercent}%
-                  </p>
                 </div>
               </div>
             )}

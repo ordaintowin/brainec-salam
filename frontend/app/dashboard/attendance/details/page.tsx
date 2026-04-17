@@ -24,7 +24,7 @@ const scopeLabels: Record<string, string> = {
 };
 
 const statusLabels: Record<string, { label: string; color: string }> = {
-  PRESENT: { label: 'Present', color: 'text-green-700' },
+  PRESENT: { label: 'Present (Including Late)', color: 'text-green-700' },
   ABSENT: { label: 'Absent', color: 'text-red-600' },
   LATE: { label: 'Late', color: 'text-yellow-700' },
 };

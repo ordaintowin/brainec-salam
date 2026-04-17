@@ -1,19 +1,35 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
-import { CreateFeeOrderDto, RecordPaymentDto } from './dto/finance.dto';
+import { CreateFeeOrderDto, RecordPaymentDto, BulkPaymentDto, FeeOrderType } from './dto/finance.dto';
 import { PaymentStatus } from '@prisma/client';
+
+/** Tolerance used when comparing floating-point amounts to avoid false overpayment errors */
+const FLOAT_EPSILON = 0.001;
 
 @Injectable()
 export class FinanceService {
   constructor(private prisma: PrismaService) {}
 
   async createFeeOrder(dto: CreateFeeOrderDto, createdById: string) {
+    // Derive the fee order type from provided data when not explicitly supplied
+    let orderType: FeeOrderType;
+    if (dto.type) {
+      orderType = dto.type;
+    } else if (dto.studentIds && dto.studentIds.length > 0) {
+      orderType = FeeOrderType.INDIVIDUAL;
+    } else if (dto.classId) {
+      orderType = FeeOrderType.CLASS;
+    } else {
+      orderType = FeeOrderType.ALL;
+    }
+
     const feeOrder = await this.prisma.feeOrder.create({
       data: {
         title: dto.title,
         description: dto.description,
         amount: dto.amount,
         dueDate: new Date(dto.dueDate),
+        type: orderType as any,
         classId: dto.classId || null,
         createdById,
       },
@@ -61,12 +77,16 @@ export class FinanceService {
 
   async getFeeOrders(page = 1, limit = 10, q?: string) {
     const skip = (page - 1) * limit;
-    const where: any = {};
+    const where: any = { isArchived: false };
 
     if (q) {
-      where.OR = [
-        { title: { contains: q, mode: 'insensitive' } },
-        { description: { contains: q, mode: 'insensitive' } },
+      where.AND = [
+        {
+          OR: [
+            { title: { contains: q, mode: 'insensitive' } },
+            { description: { contains: q, mode: 'insensitive' } },
+          ],
+        },
       ];
     }
 
@@ -168,16 +188,20 @@ export class FinanceService {
     const amountNum = Number(dto.amount);
     const currentPaid = Number(invoice.amountPaid);
     const amountDue = Number(invoice.amountDue);
+    const currentBalance = amountDue - currentPaid;
 
     if (amountNum <= 0) {
       throw new BadRequestException('Payment amount must be positive');
     }
 
+    if (amountNum > currentBalance + FLOAT_EPSILON) {
+      throw new BadRequestException(
+        `Payment amount (${amountNum.toFixed(2)}) exceeds the outstanding balance (${currentBalance.toFixed(2)})`,
+      );
+    }
+
     const newPaid = currentPaid + amountNum;
-    const rawBalance = amountDue - newPaid;
-    // Clamp balance at 0 — any excess is carried forward to the next invoice
-    const newBalance = rawBalance < 0 ? 0 : rawBalance;
-    const creditAmount = rawBalance < 0 ? Math.abs(rawBalance) : 0;
+    const newBalance = Math.max(0, amountDue - newPaid);
 
     const status: PaymentStatus =
       newBalance <= 0 ? PaymentStatus.PAID : newPaid > 0 ? PaymentStatus.PARTIAL : PaymentStatus.PENDING;
@@ -198,63 +222,122 @@ export class FinanceService {
       this.prisma.feeInvoice.update({
         where: { id: dto.invoiceId },
         data: {
-          amountPaid: newPaid > amountDue ? amountDue : newPaid,
+          amountPaid: newPaid,
           balance: newBalance,
           status,
         },
       }),
     ]);
 
-    // Carry forward any credit to the student's next pending invoice
-    if (creditAmount > 0) {
-      const nextInvoice = await this.prisma.feeInvoice.findFirst({
-        where: {
-          studentId: dto.studentId,
-          status: { in: [PaymentStatus.PENDING, PaymentStatus.PARTIAL, PaymentStatus.OVERDUE] },
-          id: { not: dto.invoiceId },
-        },
-        orderBy: { dueDate: 'asc' },
+    // Auto-archive fee order if all its invoices are now fully paid
+    await this.checkAndArchiveFeeOrder(dto.invoiceId);
+
+    return payment;
+  }
+
+  /** After a payment, check if all invoices for the fee order are paid, and archive the order if so */
+  private async checkAndArchiveFeeOrder(invoiceId: string): Promise<void> {
+    const invoice = await this.prisma.feeInvoice.findUnique({
+      where: { id: invoiceId },
+      select: { feeOrderId: true },
+    });
+    if (!invoice) return;
+
+    const allInvoices = await this.prisma.feeInvoice.findMany({
+      where: { feeOrderId: invoice.feeOrderId },
+      select: { status: true, balance: true, amountPaid: true },
+    });
+
+    if (allInvoices.length === 0) return;
+
+    const allPaid = allInvoices.every((inv) =>
+      this.isEffectivelyPaid(inv.status, Number(inv.balance), Number(inv.amountPaid)),
+    );
+
+    if (allPaid) {
+      await this.prisma.feeOrder.update({
+        where: { id: invoice.feeOrderId },
+        data: { isArchived: true, archivedAt: new Date() } as any,
       });
+    }
+  }
 
-      if (nextInvoice) {
-        const nextDue = Number(nextInvoice.amountDue);
-        const nextAlreadyPaid = Number(nextInvoice.amountPaid);
-        const nextRemaining = Math.max(0, nextDue - nextAlreadyPaid);
-        // Only apply credit up to what is actually owed on the next invoice
-        const appliedCredit = Math.min(creditAmount, nextRemaining);
-        if (appliedCredit > 0) {
-          const nextPaid = nextAlreadyPaid + appliedCredit;
-          const nextBalance = Math.max(0, nextDue - nextPaid);
-          const nextStatus: PaymentStatus =
-            nextBalance <= 0 ? PaymentStatus.PAID : nextPaid > 0 ? PaymentStatus.PARTIAL : PaymentStatus.PENDING;
-
-          await this.prisma.$transaction([
-            this.prisma.payment.create({
-              data: {
-                studentId: dto.studentId,
-                invoiceId: nextInvoice.id,
-                amount: appliedCredit,
-                method: dto.method,
-                reference: dto.reference,
-                paidBy: dto.paidBy,
-                recordedBy: recordedById,
-                notes: `Credit carried forward from invoice ${dto.invoiceId}`,
-              },
-            }),
-            this.prisma.feeInvoice.update({
-              where: { id: nextInvoice.id },
-              data: {
-                amountPaid: nextPaid,
-                balance: nextBalance,
-                status: nextStatus,
-              },
-            }),
-          ]);
-        }
-      }
+  async bulkPayment(dto: BulkPaymentDto, recordedById: string) {
+    if (!dto.invoiceIds || dto.invoiceIds.length === 0) {
+      throw new BadRequestException('At least one invoice must be selected');
     }
 
-    return { ...payment, creditCarriedForward: creditAmount };
+    // Load all selected invoices and validate they belong to the student
+    const invoices = await this.prisma.feeInvoice.findMany({
+      where: { id: { in: dto.invoiceIds }, studentId: dto.studentId },
+      orderBy: { dueDate: 'asc' },
+    });
+
+    if (invoices.length !== dto.invoiceIds.length) {
+      throw new BadRequestException('One or more invoices not found or do not belong to this student');
+    }
+
+    // Compute total outstanding across all selected invoices
+    const totalOutstanding = invoices.reduce((sum, inv) => sum + Number(inv.balance), 0);
+
+    if (dto.amount <= 0) {
+      throw new BadRequestException('Payment amount must be positive');
+    }
+
+    if (dto.amount > totalOutstanding + FLOAT_EPSILON) {
+      throw new BadRequestException(
+        `Payment amount (${dto.amount}) exceeds total outstanding balance (${totalOutstanding.toFixed(2)}) for the selected invoices`,
+      );
+    }
+
+    // Distribute the payment across invoices in due-date order
+    let remaining = dto.amount;
+    const createdPayments: any[] = [];
+
+    for (const inv of invoices) {
+      if (remaining <= 0) break;
+
+      const balance = Number(inv.balance);
+      if (balance <= 0) continue;
+
+      const applyAmount = Math.min(remaining, balance);
+      // Round to 2 decimal places to prevent floating-point precision drift when distributing across invoices
+      remaining = Math.round((remaining - applyAmount) * 100) / 100;
+
+      const currentPaid = Number(inv.amountPaid);
+      const amountDue = Number(inv.amountDue);
+      const newPaid = currentPaid + applyAmount;
+      const newBalance = Math.max(0, amountDue - newPaid);
+
+      const status: PaymentStatus =
+        newBalance <= 0 ? PaymentStatus.PAID : newPaid > 0 ? PaymentStatus.PARTIAL : PaymentStatus.PENDING;
+
+      const [payment] = await this.prisma.$transaction([
+        this.prisma.payment.create({
+          data: {
+            studentId: dto.studentId,
+            invoiceId: inv.id,
+            amount: applyAmount,
+            method: dto.method,
+            reference: dto.reference,
+            paidBy: dto.paidBy,
+            recordedBy: recordedById,
+            notes: dto.notes,
+          },
+        }),
+        this.prisma.feeInvoice.update({
+          where: { id: inv.id },
+          data: { amountPaid: newPaid, balance: newBalance, status },
+        }),
+      ]);
+
+      createdPayments.push(payment);
+
+      // Check and archive fee order if fully paid
+      await this.checkAndArchiveFeeOrder(inv.id);
+    }
+
+    return { payments: createdPayments, totalApplied: dto.amount };
   }
 
   /** Compute how much overpayment credit a student has on a specific invoice */
@@ -268,10 +351,19 @@ export class FinanceService {
     return status === PaymentStatus.PAID || (balance <= 0 && amountPaid > 0);
   }
 
-  async getPayments(page = 1, limit = 10) {
+  async getPayments(page = 1, limit = 10, q?: string) {
     const skip = (page - 1) * limit;
+    const where: any = {};
+    if (q) {
+      where.OR = [
+        { student: { firstName: { contains: q, mode: 'insensitive' } } },
+        { student: { lastName: { contains: q, mode: 'insensitive' } } },
+        { reference: { contains: q, mode: 'insensitive' } },
+      ];
+    }
     const [data, total] = await Promise.all([
       this.prisma.payment.findMany({
+        where,
         skip,
         take: limit,
         orderBy: { paidAt: 'desc' },
@@ -292,7 +384,7 @@ export class FinanceService {
           },
         },
       }),
-      this.prisma.payment.count(),
+      this.prisma.payment.count({ where }),
     ]);
 
     return {
@@ -383,8 +475,11 @@ export class FinanceService {
         description: feeOrder.description,
         amount: Number(feeOrder.amount),
         dueDate: feeOrder.dueDate,
+        type: (feeOrder as any).type,
         class: feeOrder.class,
         invoiceCount: feeOrder._count.invoices,
+        isArchived: (feeOrder as any).isArchived,
+        archivedAt: (feeOrder as any).archivedAt,
       },
       totalToCollect,
       totalCollected,
@@ -397,6 +492,7 @@ export class FinanceService {
   async getSummary() {
     const [invoices, classes, feeOrders] = await Promise.all([
       this.prisma.feeInvoice.findMany({
+        where: { feeOrder: { isArchived: false } as any },
         select: {
           amountDue: true,
           amountPaid: true,
@@ -417,8 +513,8 @@ export class FinanceService {
       }),
       this.prisma.class.findMany({ select: { id: true, name: true } }),
       this.prisma.feeOrder.findMany({
+        where: { isArchived: false } as any,
         select: { id: true, title: true, amount: true, dueDate: true },
-        orderBy: { createdAt: 'desc' },
       }),
     ]);
 
@@ -532,6 +628,41 @@ export class FinanceService {
         paidStudents: v.paidStudents,
         owingStudents: v.owingStudents,
       })),
+    };
+  }
+
+  async getArchivedFeeOrders(page = 1, limit = 10, q?: string) {
+    const skip = (page - 1) * limit;
+    const where: any = { isArchived: true };
+
+    if (q) {
+      where.AND = [
+        {
+          OR: [
+            { title: { contains: q, mode: 'insensitive' } },
+            { description: { contains: q, mode: 'insensitive' } },
+          ],
+        },
+      ];
+    }
+
+    const [data, total] = await Promise.all([
+      this.prisma.feeOrder.findMany({
+        where,
+        skip,
+        take: limit,
+        orderBy: { archivedAt: 'desc' } as any,
+        include: {
+          class: { select: { id: true, name: true } },
+          _count: { select: { invoices: true } },
+        },
+      }),
+      this.prisma.feeOrder.count({ where }),
+    ]);
+
+    return {
+      data,
+      meta: { total, page, limit, totalPages: Math.ceil(total / limit) },
     };
   }
 }

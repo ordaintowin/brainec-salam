@@ -14,6 +14,7 @@ import {
   LogOut,
   School,
   CalendarRange,
+  X,
 } from 'lucide-react';
 import { useAuth } from '@/lib/auth';
 import InitialsAvatar from './InitialsAvatar';
@@ -24,6 +25,14 @@ interface NavItem {
   icon: React.ReactNode;
   roles?: string[];
 }
+
+const roleLabelMap: Record<string, string> = {
+  HEADMISTRESS: 'Admin Head',
+  ADMIN: 'Admin',
+  TEACHER: 'Teacher',
+};
+
+const formatRoleFallback = (role: string) => role.charAt(0).toUpperCase() + role.slice(1).toLowerCase();
 
 const navItems: NavItem[] = [
   { label: 'Dashboard', href: '/dashboard', icon: <LayoutDashboard className="w-5 h-5" /> },
@@ -44,7 +53,14 @@ const teacherNavItems: NavItem[] = [
   { label: 'Attendance', href: '/dashboard/attendance', icon: <ClipboardList className="w-5 h-5" /> },
 ];
 
-export default function Sidebar() {
+interface SidebarProps {
+  className?: string;
+  onNavigate?: () => void;
+  showCloseButton?: boolean;
+  onClose?: () => void;
+}
+
+export default function Sidebar({ className = '', onNavigate, showCloseButton = false, onClose }: SidebarProps) {
   const pathname = usePathname();
   const router = useRouter();
   const { user, logout } = useAuth();
@@ -68,16 +84,26 @@ export default function Sidebar() {
   };
 
   return (
-    <aside className="w-64 bg-[#16a34a] flex flex-col h-full shrink-0">
+    <aside className={`w-64 bg-[#16a34a] flex flex-col h-full shrink-0 ${className}`}>
       {/* Brand */}
       <div className="flex items-center gap-3 px-6 py-5 border-b border-green-600">
         <div className="w-9 h-9 bg-white rounded-lg flex items-center justify-center shrink-0">
           <School className="w-5 h-5 text-[#16a34a]" />
         </div>
-        <div>
+        <div className="min-w-0 flex-1">
           <p className="text-white font-bold text-sm leading-tight">Brainec Salam</p>
           <p className="text-green-200 text-xs">School Management</p>
         </div>
+        {showCloseButton && (
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-lg p-1.5 text-white hover:bg-green-600"
+            aria-label="Close menu"
+          >
+            <X className="w-5 h-5" />
+          </button>
+        )}
       </div>
 
       {/* Nav */}
@@ -87,6 +113,7 @@ export default function Sidebar() {
             <li key={item.href}>
               <Link
                 href={item.href}
+                onClick={onNavigate}
                 className={`flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors ${
                   isActive(item.href)
                     ? 'bg-white text-[#16a34a]'
@@ -107,7 +134,7 @@ export default function Sidebar() {
           <InitialsAvatar name={user?.name || 'User'} size="sm" />
           <div className="min-w-0">
             <p className="text-white text-sm font-medium truncate">{user?.name}</p>
-            <p className="text-green-200 text-xs capitalize">{user?.role?.toLowerCase()}</p>
+            <p className="text-green-200 text-xs">{user?.role ? roleLabelMap[user.role] || formatRoleFallback(user.role) : ''}</p>
           </div>
         </div>
         <button

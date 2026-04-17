@@ -1,6 +1,18 @@
 'use client';
-import { useEffect, useState, useCallback } from 'react';
-import { Plus, X, Loader2, Lock, FileText, Calendar, Sun } from 'lucide-react';
+import { Fragment, useEffect, useState, useCallback, useMemo } from 'react';
+import {
+  Plus,
+  X,
+  Loader2,
+  Lock,
+  FileText,
+  Calendar,
+  Sun,
+  Pencil,
+  ChevronDown,
+  ChevronRight,
+  Download,
+} from 'lucide-react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
@@ -48,6 +60,67 @@ interface TermReport {
   }[];
 }
 
+interface SchoolClass {
+  id: string;
+  name: string;
+}
+
+interface AttendanceRecord {
+  student: {
+    id: string;
+    studentId: string;
+    firstName: string;
+    lastName: string;
+  };
+  attendance: {
+    status: 'PRESENT' | 'ABSENT' | 'LATE';
+    notes?: string;
+  } | null;
+}
+
+type AttendanceStatus = 'PRESENT' | 'ABSENT' | 'LATE' | null;
+type NonNullAttendanceStatus = Exclude<AttendanceStatus, null>;
+
+interface CalendarDayClassReport {
+  classId: string;
+  className: string;
+  records: AttendanceRecord[];
+  present: number;
+  absent: number;
+  late: number;
+  total: number;
+}
+
+const REPORT_TABLE_COLUMN_COUNT = 7;
+const NOT_MARKED_LABEL = 'Not Marked';
+const DAY_STATUS_BADGE_STYLES: Record<NonNullAttendanceStatus | 'NOT_MARKED', string> = {
+  PRESENT: 'bg-green-100 text-green-700',
+  ABSENT: 'bg-red-100 text-red-700',
+  LATE: 'bg-amber-100 text-amber-700',
+  NOT_MARKED: 'bg-gray-100 text-gray-600',
+};
+
+const calculateDayAttendancePercent = (present: number, late: number, total: number) =>
+  total > 0 ? Math.round(((present + late) / total) * 100) : 0;
+
+const getAttendedCount = (present: number, late: number) => present + late;
+
+const getNotMarkedCount = (row: CalendarDayClassReport) =>
+  Math.max(row.total - (row.present + row.absent + row.late), 0);
+
+const escapeCsvValue = (value: string | number) => {
+  const str = String(value);
+  return `"${str.replace(/"/g, '""')}"`;
+};
+
+const rowsToCsv = (rows: Array<Record<string, string | number>>) => {
+  if (rows.length === 0) return '';
+  const headers = Object.keys(rows[0]);
+  const headerRow = headers.map(escapeCsvValue).join(',');
+  const dataRows = rows.map((row) => headers.map((header) => escapeCsvValue(row[header] ?? '')).join(','));
+  return [headerRow, ...dataRows].join('\n');
+};
+
 const termSchema = z.object({
   name: z.string().min(1, 'Name is required'),
   startDate: z.string().min(1, 'Start date is required'),
@@ -69,12 +142,28 @@ export default function TermsPage() {
   const [calendarLoading, setCalendarLoading] = useState(false);
   const [togglingDay, setTogglingDay] = useState<string | null>(null);
   const [closeConfirm, setCloseConfirm] = useState<string | null>(null);
+  const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+  const [editingTerm, setEditingTerm] = useState<Term | null>(null);
+  const [editError, setEditError] = useState('');
+  const [reportSearch, setReportSearch] = useState('');
+  const [selectedCalendarDay, setSelectedCalendarDay] = useState<string | null>(null);
+  const [selectedDayReports, setSelectedDayReports] = useState<CalendarDayClassReport[]>([]);
+  const [expandedDayClasses, setExpandedDayClasses] = useState<Set<string>>(new Set());
+  const [selectedDayLoading, setSelectedDayLoading] = useState(false);
+  const [selectedDayError, setSelectedDayError] = useState('');
 
   const {
     register,
     handleSubmit,
     reset,
     formState: { errors, isSubmitting },
+  } = useForm<TermForm>({ resolver: zodResolver(termSchema) });
+
+  const {
+    register: registerEdit,
+    handleSubmit: handleEditSubmit,
+    reset: resetEdit,
+    formState: { errors: editErrors, isSubmitting: editSubmitting },
   } = useForm<TermForm>({ resolver: zodResolver(termSchema) });
 
   const hasActiveTerm = terms.some(t => t.status === 'ACTIVE');
@@ -125,6 +214,10 @@ export default function TermsPage() {
   const viewReport = async (termId: string) => {
     setReportLoading(true);
     setCalendarTerm(null);
+    setSelectedCalendarDay(null);
+    setSelectedDayReports([]);
+    setSelectedDayError('');
+    setReportSearch('');
     try {
       const res = await api.get(`/terms/${termId}/report`);
       setReport(res.data);
@@ -138,6 +231,7 @@ export default function TermsPage() {
   const viewCalendar = async (termId: string) => {
     setCalendarLoading(true);
     setReport(null);
+    setReportSearch('');
     try {
       const res = await api.get(`/terms/${termId}`);
       setCalendarTerm(res.data);
@@ -149,11 +243,13 @@ export default function TermsPage() {
   };
 
   const toggleHoliday = async (dayId: string, isHoliday: boolean) => {
+    if (!isHoliday && !window.confirm('Remove holiday and mark as school day?')) {
+      return;
+    }
     setTogglingDay(dayId);
     try {
       const label = isHoliday ? prompt('Holiday label (optional):') || undefined : undefined;
       await api.patch(`/terms/days/${dayId}/holiday`, { isHoliday, label });
-      // Refresh the calendar
       if (calendarTerm) {
         const res = await api.get(`/terms/${calendarTerm.id}`);
         setCalendarTerm(res.data);
@@ -165,6 +261,72 @@ export default function TermsPage() {
     }
   };
 
+  useEffect(() => {
+    if (!selectedCalendarDay) {
+      setSelectedDayReports([]);
+      setExpandedDayClasses(new Set());
+      setSelectedDayError('');
+      return;
+    }
+
+    let cancelled = false;
+
+    const fetchDayReport = async () => {
+      setSelectedDayLoading(true);
+      setSelectedDayError('');
+      try {
+        const classesRes = await api.get('/classes');
+        const classes: SchoolClass[] = classesRes.data?.classes || classesRes.data || [];
+
+        const reports = await Promise.all(
+          classes.map(async (schoolClass): Promise<CalendarDayClassReport> => {
+            const attRes = await api.get('/attendance', {
+              params: { classId: schoolClass.id, date: selectedCalendarDay },
+            });
+            const records: AttendanceRecord[] = Array.isArray(attRes.data)
+              ? attRes.data
+              : attRes.data?.records || [];
+
+            const present = records.filter((r) => r.attendance?.status === 'PRESENT').length;
+            const absent = records.filter((r) => r.attendance?.status === 'ABSENT').length;
+            const late = records.filter((r) => r.attendance?.status === 'LATE').length;
+
+            return {
+              classId: schoolClass.id,
+              className: schoolClass.name,
+              records,
+              present,
+              absent,
+              late,
+              total: records.length,
+            };
+          }),
+        );
+
+        if (!cancelled) {
+          setSelectedDayReports(reports);
+          setExpandedDayClasses(new Set());
+        }
+      } catch {
+        if (!cancelled) {
+          setSelectedDayReports([]);
+          setExpandedDayClasses(new Set());
+          setSelectedDayError('Failed to load attendance report for this day.');
+        }
+      } finally {
+        if (!cancelled) {
+          setSelectedDayLoading(false);
+        }
+      }
+    };
+
+    fetchDayReport();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedCalendarDay]);
+
   const handleCreateClick = () => {
     if (hasActiveTerm) {
       setCreateError('Please close the current active term before creating a new one.');
@@ -175,7 +337,31 @@ export default function TermsPage() {
     setShowModal(true);
   };
 
-  // Group calendar days by month
+  const openEditModal = (term: Term) => {
+    resetEdit({
+      name: term.name,
+      startDate: term.startDate.slice(0, 10),
+      endDate: term.endDate.slice(0, 10),
+    });
+    setEditError('');
+    setEditingTerm(term);
+    setIsEditModalOpen(true);
+  };
+
+  const onEdit = async (data: TermForm) => {
+    if (!editingTerm) return;
+    setEditError('');
+    try {
+      await api.patch(`/terms/${editingTerm.id}`, data);
+      setIsEditModalOpen(false);
+      setEditingTerm(null);
+      fetchTerms();
+    } catch (err: unknown) {
+      const msg = (err as { response?: { data?: { message?: string } } })?.response?.data?.message || 'Failed to update term';
+      setEditError(msg);
+    }
+  };
+
   const groupByMonth = (days: TermDay[]) => {
     const months: Record<string, TermDay[]> = {};
     for (const day of days) {
@@ -187,7 +373,92 @@ export default function TermsPage() {
     return months;
   };
 
+  const filteredReportStudents = useMemo(() => {
+    if (!report) return [];
+    const query = reportSearch.trim().toLowerCase();
+    if (!query) return report.students;
+    return report.students.filter((row) => {
+      const fullName = `${row.student.firstName} ${row.student.lastName}`.toLowerCase();
+      const studentId = row.student.studentId.toLowerCase();
+      return fullName.includes(query) || studentId.includes(query);
+    });
+  }, [report, reportSearch]);
+
   const canManage = user?.role === 'HEADMISTRESS';
+
+  const toggleDayClassExpanded = (classId: string) => {
+    setExpandedDayClasses((prev) => {
+      const next = new Set(prev);
+      if (next.has(classId)) {
+        next.delete(classId);
+      } else {
+        next.add(classId);
+      }
+      return next;
+    });
+  };
+
+  const getStatusBadge = (status: AttendanceStatus) => {
+    const effectiveStatus = status ?? 'NOT_MARKED';
+    const label = effectiveStatus === 'NOT_MARKED' ? NOT_MARKED_LABEL : effectiveStatus;
+    return (
+      <span className={`inline-block px-2 py-0.5 rounded-full text-xs font-medium ${DAY_STATUS_BADGE_STYLES[effectiveStatus]}`}> 
+        {label}
+      </span>
+    );
+  };
+
+  const handleDayExcelDownload = () => {
+    if (!selectedCalendarDay || selectedDayReports.length === 0) return;
+
+    const summaryRows = selectedDayReports.map((cls) => {
+      const presentCount = cls.records.filter((r) => r.attendance?.status === 'PRESENT').length;
+      const late = cls.records.filter((r) => r.attendance?.status === 'LATE').length;
+      const attendedCount = getAttendedCount(presentCount, late);
+      const absent = cls.records.filter((r) => r.attendance?.status === 'ABSENT').length;
+      const notMarked = cls.records.filter((r) => !r.attendance).length;
+      const total = cls.records.length;
+      const attendancePct = total > 0
+        ? Math.round((attendedCount / total) * 100)
+        : 0;
+      return {
+        'Class': cls.className,
+        'Attended': attendedCount,
+        'Absent': absent,
+        'Late': late,
+        'Not Marked': notMarked,
+        'Total': total,
+        'Attendance %': `${attendancePct}%`,
+      };
+    });
+
+    const detailsRows = selectedDayReports.flatMap((cls) =>
+      cls.records.map((r) => ({
+        'Class': cls.className,
+        'Student ID': r.student.studentId,
+        'Student Name': `${r.student.firstName} ${r.student.lastName}`,
+        'Status': r.attendance?.status ?? NOT_MARKED_LABEL,
+        'Notes': r.attendance?.notes ?? '',
+      }))
+    );
+
+    const csvContent = [
+      'Summary',
+      rowsToCsv(summaryRows),
+      '',
+      'Details',
+      rowsToCsv(detailsRows),
+    ].join('\n');
+
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = `Attendance_${selectedCalendarDay}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(link.href);
+  };
 
   return (
     <div className="p-8">
@@ -207,7 +478,6 @@ export default function TermsPage() {
         )}
       </div>
 
-      {/* Warning if active term exists */}
       {hasActiveTerm && createError && !showModal && (
         <div className="mb-4 p-3 bg-yellow-50 border border-yellow-200 text-yellow-700 rounded-lg text-sm">
           {createError}
@@ -224,7 +494,7 @@ export default function TermsPage() {
       ) : (
         <div className="space-y-3">
           {terms.map((term) => (
-            <div key={term.id} className={`bg-white rounded-xl border p-5 ${term.status === 'ACTIVE' ? 'border-green-200' : 'border-gray-200'}`}>
+            <div key={term.id} className={`bg-white rounded-xl border p-5 ${term.status === 'ACTIVE' ? 'border-green-200' : 'border-gray-200'}`}>  
               <div className="flex items-center justify-between">
                 <div>
                   <div className="flex items-center gap-3">
@@ -233,7 +503,7 @@ export default function TermsPage() {
                       term.status === 'ACTIVE'
                         ? 'bg-green-100 text-green-700'
                         : 'bg-gray-100 text-gray-500'
-                    }`}>
+                    }`}> 
                       {term.status}
                     </span>
                   </div>
@@ -272,6 +542,15 @@ export default function TermsPage() {
                       Close Term
                     </button>
                   )}
+                  {canManage && (
+                    <button
+                      onClick={() => openEditModal(term)}
+                      className="flex items-center gap-1.5 px-3 py-1.5 text-sm border border-gray-300 text-gray-700 hover:bg-gray-50 rounded-lg"
+                    >
+                      <Pencil className="w-4 h-4" />
+                      Edit
+                    </button>
+                  )}
                 </div>
               </div>
             </div>
@@ -292,7 +571,13 @@ export default function TermsPage() {
               </p>
             </div>
             <button
-              onClick={() => setCalendarTerm(null)}
+              onClick={() => {
+                setCalendarTerm(null);
+                setSelectedCalendarDay(null);
+                setSelectedDayReports([]);
+                setExpandedDayClasses(new Set());
+                setSelectedDayError('');
+              }}
               className="text-gray-400 hover:text-gray-600 text-sm"
             >
               Close Calendar
@@ -302,20 +587,23 @@ export default function TermsPage() {
           {Object.entries(groupByMonth(calendarTerm.termDays)).map(([month, days]) => (
             <div key={month} className="mb-6">
               <h3 className="text-sm font-semibold text-gray-700 mb-2">{month}</h3>
-              <div className="grid grid-cols-5 md:grid-cols-7 lg:grid-cols-10 gap-2">
+              <div className="grid grid-cols-3 sm:grid-cols-5 md:grid-cols-7 lg:grid-cols-10 gap-2">
                 {days.map(day => {
-                  const d = new Date(day.date);
+                  const dayDate = day.date.split('T')[0];
+                  const d = new Date(`${dayDate}T00:00:00Z`);
                   const dayName = d.toLocaleDateString('en-GH', { weekday: 'short' });
                   const dayNum = d.getUTCDate();
-                  const today = new Date();
-                  today.setUTCHours(0, 0, 0, 0);
-                  const isPast = d <= today;
-                  const isToday = d.getTime() === today.getTime();
+                  const todayDate = new Date().toISOString().slice(0, 10);
+                  const isPast = dayDate < todayDate;
+                  const isToday = dayDate === todayDate;
+                  const isSelected = selectedCalendarDay === dayDate;
+                  const shouldDisableMarkHoliday = !day.isHoliday && isPast && !isToday;
 
                   return (
                     <div
                       key={day.id}
-                      className={`relative p-2 rounded-lg border text-center text-xs transition-all ${
+                      onClick={() => setSelectedCalendarDay(prev => (prev === dayDate ? null : dayDate))}
+                      className={`relative p-2 rounded-lg border text-center text-xs transition-all cursor-pointer ${
                         day.isHoliday
                           ? 'bg-orange-50 border-orange-200 text-orange-700'
                           : isToday
@@ -323,7 +611,7 @@ export default function TermsPage() {
                           : isPast
                           ? 'bg-gray-50 border-gray-200 text-gray-500'
                           : 'bg-white border-gray-200 text-gray-700'
-                      }`}
+                      } ${isSelected ? 'ring-2 ring-[#16a34a]' : ''}`}
                     >
                       <p className="font-bold text-sm">{dayNum}</p>
                       <p className="text-[10px] text-gray-400">{dayName}</p>
@@ -335,9 +623,12 @@ export default function TermsPage() {
                       )}
                       {canManage && calendarTerm.status === 'ACTIVE' && (
                         <button
-                          onClick={() => toggleHoliday(day.id, !day.isHoliday)}
-                          disabled={togglingDay === day.id}
-                          className="mt-1 text-[10px] underline text-gray-400 hover:text-gray-700 disabled:opacity-50"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            toggleHoliday(day.id, !day.isHoliday);
+                          }}
+                          disabled={togglingDay === day.id || shouldDisableMarkHoliday}
+                          className="mt-1 text-[10px] underline text-gray-400 hover:text-gray-700 disabled:opacity-50 disabled:cursor-not-allowed"
                         >
                           {togglingDay === day.id ? '…' : day.isHoliday ? 'Mark School Day' : 'Mark Holiday'}
                         </button>
@@ -348,6 +639,116 @@ export default function TermsPage() {
               </div>
             </div>
           ))}
+
+          {selectedCalendarDay && (
+            <div className="mt-6 bg-white rounded-xl border border-gray-200 shadow-sm p-4">
+              <div className="flex items-center justify-between gap-3">
+                <h3 className="text-base font-semibold text-gray-900">
+                  Attendance for {new Date(`${selectedCalendarDay}T00:00:00Z`).toLocaleDateString('en-GH', {
+                    weekday: 'long',
+                    day: 'numeric',
+                    month: 'long',
+                    year: 'numeric',
+                    timeZone: 'UTC',
+                  })}
+                </h3>
+                <button
+                  onClick={handleDayExcelDownload}
+                  disabled={selectedDayLoading || !!selectedDayError || selectedDayReports.length === 0}
+                  className="flex items-center gap-2 px-3 py-1.5 text-sm font-medium bg-[#16a34a] hover:bg-green-700 text-white rounded-lg disabled:opacity-60 disabled:cursor-not-allowed"
+                >
+                  <Download className="w-4 h-4" />
+                  Download CSV
+                </button>
+              </div>
+
+              {selectedDayLoading ? (
+                <p className="text-sm text-gray-500 mt-3">Loading day report...</p>
+              ) : selectedDayError ? (
+                <p className="text-sm text-red-600 mt-3">{selectedDayError}</p>
+              ) : selectedDayReports.length === 0 ? (
+                <p className="text-sm text-gray-500 mt-3">No classes found.</p>
+              ) : (
+                <div className="mt-3 overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="bg-gray-50 border-b">
+                        <th className="text-left px-4 py-2 text-xs text-gray-400 font-medium uppercase">Class</th>
+                        <th className="text-center px-4 py-2 text-xs text-gray-400 font-medium uppercase">Attended</th>
+                        <th className="text-center px-4 py-2 text-xs text-gray-400 font-medium uppercase">Absent</th>
+                        <th className="text-center px-4 py-2 text-xs text-gray-400 font-medium uppercase">Late</th>
+                        <th className="text-center px-4 py-2 text-xs text-gray-400 font-medium uppercase">Attendance %</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-100">
+                      {selectedDayReports.map((row) => {
+                        const total = row.total;
+                        const attendancePercent = calculateDayAttendancePercent(row.present, row.late, total);
+                        const isExpanded = expandedDayClasses.has(row.classId);
+                        return (
+                          <Fragment key={row.classId}> 
+                            <tr
+                              onClick={() => toggleDayClassExpanded(row.classId)}
+                              className="cursor-pointer hover:bg-gray-50"
+                            >
+                              <td className="px-4 py-2 font-medium text-gray-800">
+                                <div className="flex items-center gap-2">
+                                  {isExpanded ? <ChevronDown className="w-4 h-4 text-gray-500" /> : <ChevronRight className="w-4 h-4 text-gray-500" />}
+                                  {row.className}
+                                </div>
+                              </td>
+                              <td className="px-4 py-2 text-center text-green-700 font-medium">{getAttendedCount(row.present, row.late)}</td>
+                              <td className="px-4 py-2 text-center text-red-600 font-medium">{row.absent}</td>
+                              <td className="px-4 py-2 text-center text-yellow-600 font-medium">{row.late}</td>
+                              <td className="px-4 py-2 text-center text-gray-700">{total > 0 ? `${attendancePercent}%` : '—'}</td>
+                            </tr>
+                            {isExpanded && (
+                              <tr className="bg-gray-50/50">
+                                <td colSpan={5} className="px-4 py-3">
+                                  <div className="overflow-x-auto border border-gray-200 rounded-lg bg-white">
+                                    <table className="w-full text-xs md:text-sm">
+                                      <thead>
+                                        <tr className="bg-gray-50 border-b">
+                                          <th className="text-left px-3 py-2 text-[11px] text-gray-400 font-medium uppercase">Student ID</th>
+                                          <th className="text-left px-3 py-2 text-[11px] text-gray-400 font-medium uppercase">Student Name</th>
+                                          <th className="text-left px-3 py-2 text-[11px] text-gray-400 font-medium uppercase">Status</th>
+                                          <th className="text-left px-3 py-2 text-[11px] text-gray-400 font-medium uppercase">Notes</th>
+                                        </tr>
+                                      </thead>
+                                      <tbody className="divide-y divide-gray-100">
+                                        {row.records.length > 0 ? row.records.map((record) => (
+                                          <tr key={record.student.id}>
+                                            <td className="px-3 py-2 text-gray-600">{record.student.studentId}</td>
+                                            <td className="px-3 py-2 font-medium text-gray-800"> 
+                                              {record.student.firstName} {record.student.lastName}
+                                            </td>
+                                            <td className="px-3 py-2">
+                                              {getStatusBadge(record.attendance?.status ?? null)}
+                                            </td>
+                                            <td className="px-3 py-2 text-gray-600">{record.attendance?.notes || '—'}</td>
+                                          </tr>
+                                        )) : (
+                                          <tr>
+                                            <td colSpan={4} className="px-3 py-3 text-center text-gray-400">
+                                              No student records found.
+                                            </td>
+                                          </tr>
+                                        )}
+                                      </tbody>
+                                    </table>
+                                  </div>
+                                </td>
+                              </tr>
+                            )}
+                          </Fragment>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          )}
         </div>
       )}
 
@@ -366,14 +767,10 @@ export default function TermsPage() {
             </button>
           </div>
 
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3 mb-4">
             <div className="bg-white rounded-lg border border-gray-200 p-4 text-center">
               <p className="text-xs text-gray-400 uppercase">School Days</p>
               <p className="text-xl font-bold text-gray-800">{report.totalSchoolDays}</p>
-            </div>
-            <div className="bg-white rounded-lg border border-gray-200 p-4 text-center">
-              <p className="text-xs text-gray-400 uppercase">Total Records</p>
-              <p className="text-xl font-bold text-gray-800">{report.totalRecords}</p>
             </div>
             <div className="bg-white rounded-lg border border-gray-200 p-4 text-center">
               <p className="text-xs text-gray-400 uppercase">Students</p>
@@ -387,42 +784,62 @@ export default function TermsPage() {
 
           {report.students.length > 0 ? (
             <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+              <div className="p-4 border-b border-gray-200">
+                <input
+                  value={reportSearch}
+                  onChange={(e) => setReportSearch(e.target.value)}
+                  placeholder="Search by student name or ID"
+                  className="w-full md:w-80 px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#16a34a]"
+                />
+              </div>
               <table className="w-full text-sm">
                 <thead>
                   <tr className="bg-gray-50 border-b">
                     <th className="text-left px-4 py-3 text-xs text-gray-400 font-medium uppercase">Student</th>
                     <th className="text-left px-4 py-3 text-xs text-gray-400 font-medium uppercase">ID</th>
                     <th className="text-left px-4 py-3 text-xs text-gray-400 font-medium uppercase">Class</th>
-                    <th className="text-center px-4 py-3 text-xs text-gray-400 font-medium uppercase">Present</th>
+                    <th className="text-center px-4 py-3 text-xs text-gray-400 font-medium uppercase">Attended</th>
                     <th className="text-center px-4 py-3 text-xs text-gray-400 font-medium uppercase">Absent</th>
                     <th className="text-center px-4 py-3 text-xs text-gray-400 font-medium uppercase">Late</th>
-                    <th className="text-center px-4 py-3 text-xs text-gray-400 font-medium uppercase">Total</th>
                     <th className="text-center px-4 py-3 text-xs text-gray-400 font-medium uppercase">Attendance %</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100">
-                  {report.students.map((row) => (
-                    <tr key={row.student.id} className="hover:bg-gray-50">
-                      <td className="px-4 py-3 font-medium text-gray-800">{row.student.firstName} {row.student.lastName}</td>
-                      <td className="px-4 py-3 text-gray-500 text-xs">{row.student.studentId}</td>
-                      <td className="px-4 py-3 text-gray-600">{row.student.className}</td>
-                      <td className="px-4 py-3 text-center text-green-700 font-medium">{row.present}</td>
-                      <td className="px-4 py-3 text-center text-red-600 font-medium">{row.absent}</td>
-                      <td className="px-4 py-3 text-center text-yellow-600 font-medium">{row.late}</td>
-                      <td className="px-4 py-3 text-center text-gray-700">{row.total}</td>
-                      <td className="px-4 py-3 text-center">
-                        <span className={`inline-block px-2.5 py-0.5 rounded-full text-xs font-medium ${
-                          row.attendancePercent >= 80
-                            ? 'bg-green-100 text-green-700'
-                            : row.attendancePercent >= 60
-                            ? 'bg-yellow-100 text-yellow-700'
-                            : 'bg-red-100 text-red-700'
-                        }`}>
-                          {row.attendancePercent}%
-                        </span>
+                  {filteredReportStudents.length > 0 ? (
+                    filteredReportStudents.map((row) => {
+                      const total = row.present + row.absent + row.late;
+                      const attendancePercent = total > 0
+                        ? Math.round((getAttendedCount(row.present, row.late) / total) * 100)
+                        : 0;
+                      return (
+                        <tr key={row.student.id} className="hover:bg-gray-50">
+                          <td className="px-4 py-3 font-medium text-gray-800">{row.student.firstName} {row.student.lastName}</td>
+                          <td className="px-4 py-3 text-gray-500 text-xs">{row.student.studentId}</td>
+                          <td className="px-4 py-3 text-gray-600">{row.student.className}</td>
+                          <td className="px-4 py-3 text-center text-green-700 font-medium">{getAttendedCount(row.present, row.late)}</td>
+                          <td className="px-4 py-3 text-center text-red-600 font-medium">{row.absent}</td>
+                          <td className="px-4 py-3 text-center text-yellow-600 font-medium">{row.late}</td>
+                          <td className="px-4 py-3 text-center">
+                            <span className={`inline-block px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                              attendancePercent >= 80
+                                ? 'bg-green-100 text-green-700'
+                                : attendancePercent >= 60
+                                ? 'bg-yellow-100 text-yellow-700'
+                                : 'bg-red-100 text-red-700'
+                            }`}> 
+                              {attendancePercent}%
+                            </span>
+                          </td>
+                        </tr>
+                      );
+                    })
+                  ) : (
+                    <tr>
+                      <td colSpan={REPORT_TABLE_COLUMN_COUNT} className="px-4 py-6 text-center text-sm text-gray-400">
+                        No students match your search.
                       </td>
                     </tr>
-                  ))}
+                  )}
                 </tbody>
               </table>
             </div>
@@ -468,7 +885,7 @@ export default function TermsPage() {
                 {errors.name && <p className="text-red-500 text-xs mt-1">{errors.name.message}</p>}
               </div>
 
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Start Date *</label>
                   <input type="date" {...register('startDate')} className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#16a34a]" />
@@ -508,13 +925,27 @@ export default function TermsPage() {
       )}
 
       {/* Edit Term Modal */}
-      {editModal.open && (
+      {isEditModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center">
-          <div className="absolute inset-0 bg-black/50" onClick={() => setEditModal({ open: false, term: null })} />
+          <div
+            className="absolute inset-0 bg-black/50"
+            onClick={() => {
+              setIsEditModalOpen(false);
+              setEditingTerm(null);
+            }}
+          />
           <div className="relative bg-white rounded-xl shadow-xl p-6 w-full max-w-md mx-4">
             <div className="flex items-center justify-between mb-5">
               <h2 className="text-lg font-semibold text-gray-900">Edit Term</h2>
-              <button onClick={() => setEditModal({ open: false, term: null })} className="text-gray-400 hover:text-gray-600"><X className="w-5 h-5" /></button>
+              <button
+                onClick={() => {
+                  setIsEditModalOpen(false);
+                  setEditingTerm(null);
+                }}
+                className="text-gray-400 hover:text-gray-600"
+              >
+                <X className="w-5 h-5" />
+              </button>
             </div>
 
             {editError && (
@@ -531,7 +962,7 @@ export default function TermsPage() {
                 {editErrors.name && <p className="text-red-500 text-xs mt-1">{editErrors.name.message}</p>}
               </div>
 
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Start Date *</label>
                   <input type="date" {...registerEdit('startDate')} className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#16a34a]" />
@@ -547,7 +978,10 @@ export default function TermsPage() {
               <div className="flex gap-3 justify-end">
                 <button
                   type="button"
-                  onClick={() => setEditModal({ open: false, term: null })}
+                  onClick={() => {
+                    setIsEditModalOpen(false);
+                    setEditingTerm(null);
+                  }}
                   className="px-4 py-2 text-sm text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50"
                 >
                   Cancel

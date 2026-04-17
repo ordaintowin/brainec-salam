@@ -37,7 +37,11 @@ export default function StudentsPage() {
   const fetchStudents = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await api.get('/students', { params: { q: search, page, limit: 20 } });
+      const params: Record<string, any> = { q: search, page, limit: 20 };
+      if (user?.role === 'TEACHER' && user?.teacher?.classId) {
+        params.classId = user.teacher.classId;
+      }
+      const res = await api.get('/students', { params });
       const data = res.data;
       if (Array.isArray(data)) {
         setStudents(data);
@@ -51,7 +55,7 @@ export default function StudentsPage() {
     } finally {
       setLoading(false);
     }
-  }, [search, page]);
+  }, [search, page, user]);
 
   useEffect(() => {
     fetchStudents();
@@ -163,7 +167,11 @@ export default function StudentsPage() {
       <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Students</h1>
-          <p className="text-gray-500 text-sm mt-1">Manage all enrolled students</p>
+          <p className="text-gray-500 text-sm mt-1">
+            {user?.role === 'TEACHER' && user?.teacher?.class?.name
+              ? `Students in ${user.teacher.class.name}`
+              : 'Manage all enrolled students'}
+          </p>
         </div>
         {canManage && (
           <div className="flex items-center gap-2">

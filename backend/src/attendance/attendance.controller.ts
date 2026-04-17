@@ -21,7 +21,7 @@ export class AttendanceController {
 
   @Post()
   mark(@Body() dto: MarkAttendanceDto, @CurrentUser() user: any) {
-    return this.attendanceService.markAttendance(dto, user.id, user.role);
+    return this.attendanceService.markAttendance(dto, user.id, user);
   }
 
   @Post('bulk')
@@ -59,6 +59,11 @@ export class AttendanceController {
     return this.attendanceService.getClassReport(classId, termId);
   }
 
+  @Get('today/breakdown')
+  getTodayClassBreakdown() {
+    return this.attendanceService.getTodayClassBreakdown();
+  }
+
   @Get('closure-status')
   getClosureStatus(
     @Query('classId') classId: string,
@@ -91,6 +96,6 @@ export class AttendanceController {
     @Body() dto: UpdateAttendanceDto,
     @CurrentUser() user: any,
   ) {
-    return this.attendanceService.update(id, dto, user.id, user.role);
+    return this.attendanceService.update(id, dto, user.id, user);
   }
 }

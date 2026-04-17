@@ -1,12 +1,13 @@
 'use client';
-import { useEffect, useState, useCallback, useMemo } from 'react';
+import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import { ArrowLeft, Pencil, Printer, ChevronLeft, ChevronRight, Calendar, CheckCircle2, XCircle, Clock, TrendingUp, Archive } from 'lucide-react';
+import { ArrowLeft, Pencil, Printer, ChevronLeft, ChevronRight, Calendar, CheckCircle2, XCircle, Clock, TrendingUp, Archive, CreditCard } from 'lucide-react';
 import api from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import ProfileCard from '@/components/ProfileCard';
 import PaymentStatusBadge from '@/components/PaymentStatusBadge';
 import RecordPaymentModal from '@/components/RecordPaymentModal';
+import BulkPaymentModal from '@/components/BulkPaymentModal';
 import PrintInvoiceModal from '@/components/PrintInvoiceModal';
 import { formatDate, formatCurrency } from '@/lib/utils';
 
@@ -21,6 +22,8 @@ interface Student {
   guardianPhone: string;
   guardianEmail?: string;
   guardianAddress?: string;
+  secondaryGuardianName?: string;
+  secondaryGuardianPhone?: string;
   enrollmentDate: string;
   photoUrl?: string;
   class?: { id: string; name: string };
@@ -53,6 +56,8 @@ interface TermSummary {
   startDate: string;
   endDate: string;
   totalSchoolDays: number;
+  daysCrossed: number;
+  daysRemaining: number;
   present: number;
   absent: number;
   late: number;
@@ -142,12 +147,12 @@ function CountBadge({
   title,
 }: {
   count: number;
-  variant: 'present' | 'absent' | 'late';
+  variant: 'attended' | 'absent' | 'late';
   onClick: () => void;
   title: string;
 }) {
   const styles = {
-    present: 'bg-green-50 text-green-700 hover:bg-green-100',
+    attended: 'bg-green-50 text-green-700 hover:bg-green-100',
     absent: 'bg-red-50 text-red-700 hover:bg-red-100',
     late: 'bg-yellow-50 text-yellow-700 hover:bg-yellow-100',
   };
@@ -174,6 +179,8 @@ export default function StudentDetailPage() {
     open: false, invoiceId: '', studentId: '', balance: 0,
   });
   const [printModal, setPrintModal] = useState<{ open: boolean; invoice: Invoice | null }>({ open: false, invoice: null });
+  const [selectedInvoiceIds, setSelectedInvoiceIds] = useState<Set<string>>(new Set());
+  const [bulkPaymentOpen, setBulkPaymentOpen] = useState(false);
 
   // Attendance History State
   const [termSummaries, setTermSummaries] = useState<TermSummary[]>([]);
@@ -183,16 +190,26 @@ export default function StudentDetailPage() {
     termId: string;
     termName: string;
     status: string;
+    includeLate: boolean;
   } | null>(null);
   const [detailRecords, setDetailRecords] = useState<AttendanceDetail[]>([]);
   const [detailMeta, setDetailMeta] = useState<{ total: number; page: number; limit: number; totalPages: number }>({
     total: 0, page: 1, limit: 10, totalPages: 0,
   });
   const [detailLoading, setDetailLoading] = useState(false);
+  const attendedCacheRef = useRef<{ termId: string; records: AttendanceDetail[] } | null>(null);
 
   // Pagination for past terms archive
   const ARCHIVE_PAGE_SIZE = 5;
   const [archivePage, setArchivePage] = useState(1);
+
+  // Pagination for fee history (invoices)
+  const INVOICES_PER_PAGE = 10;
+  const [invoicePage, setInvoicePage] = useState(1);
+
+  // Pagination for attendance term summaries
+  const TERM_SUMMARIES_PER_PAGE = 10;
+  const [termSummaryPage, setTermSummaryPage] = useState(1);
 
   const canManage = user?.role === 'HEADMISTRESS' || user?.role === 'ADMIN';
 
@@ -211,6 +228,12 @@ export default function StudentDetailPage() {
     const start = (archivePage - 1) * ARCHIVE_PAGE_SIZE;
     return closedTerms.slice(start, start + ARCHIVE_PAGE_SIZE);
   }, [closedTerms, archivePage]);
+
+  const paginatedTermSummaryData = useMemo(() => {
+    const totalTermPages = Math.ceil(closedTerms.length / TERM_SUMMARIES_PER_PAGE);
+    const paginatedClosedTerms = closedTerms.slice((termSummaryPage - 1) * TERM_SUMMARIES_PER_PAGE, termSummaryPage * TERM_SUMMARIES_PER_PAGE);
+    return { totalTermPages, paginatedClosedTerms };
+  }, [closedTerms, termSummaryPage]);
 
   const fetchStudent = useCallback(async () => {
     try {
@@ -236,15 +259,81 @@ export default function StudentDetailPage() {
     }
   }, [id]);
 
-  const fetchDetail = useCallback(async (termId: string, status: string, page = 1) => {
+  const fetchDetail = useCallback(async (termId: string, status: string, page = 1, includeLate = false) => {
     setDetailLoading(true);
     try {
+      if (status === 'PRESENT' && includeLate) {
+        const applyAttendedPage = (records: AttendanceDetail[]) => {
+          const limit = 10;
+          const total = records.length;
+          const totalPages = Math.ceil(total / limit);
+          const start = (page - 1) * limit;
+
+          setDetailRecords(records.slice(start, start + limit));
+          setDetailMeta({
+            total,
+            page,
+            limit,
+            totalPages,
+          });
+        };
+
+        if (attendedCacheRef.current?.termId === termId) {
+          applyAttendedPage(attendedCacheRef.current.records);
+          return;
+        }
+
+        const fetchAllByStatus = async (statusFilter: 'PRESENT' | 'LATE') => {
+          const firstRes = await api.get(`/students/${id}/attendance-history/${termId}`, {
+            params: { status: statusFilter, page: 1, limit: 100 },
+          });
+
+          const firstPageRecords: AttendanceDetail[] = Array.isArray(firstRes.data?.data)
+            ? firstRes.data.data
+            : [];
+          const totalPages: number = Number(firstRes.data?.meta?.totalPages ?? 1);
+
+          if (totalPages <= 1) return firstPageRecords;
+
+          const remaining: AttendanceDetail[] = [];
+          for (let pageNum = 2; pageNum <= totalPages; pageNum += 1) {
+            const pageRes = await api.get(`/students/${id}/attendance-history/${termId}`, {
+              params: { status: statusFilter, page: pageNum, limit: 100 },
+            });
+            if (Array.isArray(pageRes.data?.data)) {
+              remaining.push(...pageRes.data.data);
+            }
+          }
+
+          return [
+            ...firstPageRecords,
+            ...remaining,
+          ];
+        };
+
+        const [presentRecords, lateRecords] = await Promise.all([
+          fetchAllByStatus('PRESENT'),
+          fetchAllByStatus('LATE'),
+        ]);
+
+        const attendedRecords: AttendanceDetail[] = [
+          ...presentRecords,
+          ...lateRecords,
+        ].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+
+        attendedCacheRef.current = { termId, records: attendedRecords };
+        applyAttendedPage(attendedRecords);
+        return;
+      }
+
       const res = await api.get(`/students/${id}/attendance-history/${termId}`, {
         params: { status, page, limit: 10 },
       });
+      attendedCacheRef.current = null;
       setDetailRecords(Array.isArray(res.data?.data) ? res.data.data : []);
       setDetailMeta(res.data?.meta || { total: 0, page: 1, limit: 10, totalPages: 0 });
     } catch {
+      attendedCacheRef.current = null;
       setDetailRecords([]);
       setDetailMeta({ total: 0, page: 1, limit: 10, totalPages: 0 });
     } finally {
@@ -262,20 +351,32 @@ export default function StudentDetailPage() {
     }
   }, [activeTab, fetchAttendanceHistory]);
 
-  const handleDrillDown = (termId: string, termName: string, status: string) => {
-    setDrillDown({ open: true, termId, termName, status });
-    fetchDetail(termId, status, 1);
+  useEffect(() => {
+    setInvoicePage(1);
+  }, [invoices.length]);
+
+  useEffect(() => {
+    setTermSummaryPage(1);
+  }, [closedTerms.length]);
+
+  const handleDrillDown = (termId: string, termName: string, status: string, includeLate = false) => {
+    setDrillDown({ open: true, termId, termName, status, includeLate });
+    fetchDetail(termId, status, 1, includeLate);
+  };
+  const openAttendedDrillDown = (termId: string, termName: string) => {
+    handleDrillDown(termId, termName, 'PRESENT', true);
   };
 
   const handleDetailPageChange = (newPage: number) => {
     if (!drillDown) return;
-    fetchDetail(drillDown.termId, drillDown.status, newPage);
+    fetchDetail(drillDown.termId, drillDown.status, newPage, drillDown.includeLate);
   };
 
   const closeDrillDown = () => {
     setDrillDown(null);
     setDetailRecords([]);
     setDetailMeta({ total: 0, page: 1, limit: 10, totalPages: 0 });
+    attendedCacheRef.current = null;
   };
 
   if (loading) {
@@ -293,7 +394,7 @@ export default function StudentDetailPage() {
 
   /* ---------- Render: Active Term Progress Card ---------- */
   const renderActiveTermCard = (term: TermSummary) => {
-    const progressPct = term.totalSchoolDays > 0 ? Math.round((term.totalMarked / term.totalSchoolDays) * 100) : 0;
+    const progressPct = term.totalSchoolDays > 0 ? Math.round((term.daysCrossed / term.totalSchoolDays) * 100) : 0;
     const attendedDays = term.present + term.late;
 
     return (
@@ -326,27 +427,28 @@ export default function StudentDetailPage() {
             <div className="flex items-center justify-between mb-2">
               <span className="text-xs font-medium text-gray-500">Term Progress</span>
               <span className="text-xs font-bold text-gray-700">
-                {term.totalMarked} of {term.totalSchoolDays} school days
+                {term.daysCrossed} of {term.totalSchoolDays} school days
               </span>
             </div>
-            <div className="w-full bg-gray-100 rounded-full h-2.5">
+            <div className="relative w-full bg-gray-100 rounded-full h-3">
               <div
-                className="bg-gradient-to-r from-green-500 to-emerald-500 h-2.5 rounded-full transition-all duration-500"
+                className="bg-gradient-to-r from-green-500 to-emerald-500 h-3 rounded-full transition-all duration-500"
                 style={{ width: `${Math.min(progressPct, 100)}%` }}
               />
             </div>
-            <p className="text-xs text-gray-400 mt-1">{progressPct}% of term completed</p>
+            <p className="text-xs text-gray-400 mt-1 text-center">{progressPct}% of term completed</p>
           </div>
 
           {/* Stats grid */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
             <button
-              onClick={() => handleDrillDown(term.termId, term.termName, 'PRESENT')}
+              onClick={() => openAttendedDrillDown(term.termId, term.termName)}
+              title="Present (including late)"
               className="flex flex-col items-center p-3 rounded-lg bg-green-50 hover:bg-green-100 transition-colors cursor-pointer border border-green-100"
             >
               <CheckCircle2 className="w-5 h-5 text-green-600 mb-1" />
-              <span className="text-lg font-bold text-green-700">{term.present}</span>
-              <span className="text-[10px] text-green-600 font-medium">Present</span>
+              <span className="text-lg font-bold text-green-700">{attendedDays}</span>
+              <span className="text-[10px] text-green-600 font-medium">Present (incl. late)</span>
             </button>
 
             <button
@@ -384,8 +486,8 @@ export default function StudentDetailPage() {
           <div className="text-xs text-gray-500 text-center bg-gray-50 rounded-lg py-2 px-3">
             Out of <strong className="text-gray-700">{term.totalSchoolDays}</strong> school days,{' '}
             <strong className="text-green-700">{attendedDays}</strong> attended so far
-            {term.totalSchoolDays - term.totalMarked > 0 && (
-              <> · <strong className="text-gray-700">{term.totalSchoolDays - term.totalMarked}</strong> days remaining</>
+            {term.daysRemaining > 0 && (
+              <> · <strong className="text-gray-700">{term.daysRemaining}</strong> days remaining</>
             )}
           </div>
         </div>
@@ -413,7 +515,7 @@ export default function StudentDetailPage() {
                   <th className="text-left px-4 py-3 text-xs text-gray-500 font-semibold">Term</th>
                   <th className="text-left px-4 py-3 text-xs text-gray-500 font-semibold">Period</th>
                   <th className="text-center px-4 py-3 text-xs text-gray-500 font-semibold">School Days</th>
-                  <th className="text-center px-4 py-3 text-xs text-gray-500 font-semibold">Present</th>
+                  <th className="text-center px-4 py-3 text-xs text-gray-500 font-semibold">Present (incl. late)</th>
                   <th className="text-center px-4 py-3 text-xs text-gray-500 font-semibold">Absent</th>
                   <th className="text-center px-4 py-3 text-xs text-gray-500 font-semibold">Late</th>
                   <th className="text-center px-4 py-3 text-xs text-gray-500 font-semibold">Attendance</th>
@@ -440,10 +542,10 @@ export default function StudentDetailPage() {
                       </td>
                       <td className="px-4 py-3 text-center">
                         <CountBadge
-                          count={term.present}
-                          variant="present"
-                          onClick={() => handleDrillDown(term.termId, term.termName, 'PRESENT')}
-                          title="View present days"
+                          count={attended}
+                          variant="attended"
+                          onClick={() => openAttendedDrillDown(term.termId, term.termName)}
+                          title="View attended days (present + late)"
                         />
                       </td>
                       <td className="px-4 py-3 text-center">
@@ -485,12 +587,7 @@ export default function StudentDetailPage() {
             </table>
           </div>
 
-          {/* Pagination for past terms */}
-          {closedTermsMeta.totalPages > 1 && (
-            <div className="border-t border-gray-100 px-4 py-3">
-              <PaginationBar meta={closedTermsMeta} onPageChange={setArchivePage} />
-            </div>
-          )}
+          {/* Pagination for past terms - handled by outer termSummaryPage pagination */}
         </div>
       </div>
     );
@@ -499,6 +596,12 @@ export default function StudentDetailPage() {
   /* ---------- Render: Drill-Down Detail View ---------- */
   const renderDrillDown = () => {
     if (!drillDown) return null;
+    const drillDownStatusLabel = drillDown.status === 'PRESENT' && drillDown.includeLate
+      ? 'attended'
+      : drillDown.status.toLowerCase();
+    // "Attended" in this view means PRESENT + LATE, so includeLate must be true for it to be active.
+    const isFilterActive = (value: 'PRESENT' | 'ABSENT' | 'LATE') =>
+      drillDown.status === value && (value !== 'PRESENT' || drillDown.includeLate);
 
     return (
       <div>
@@ -516,30 +619,37 @@ export default function StudentDetailPage() {
             </h3>
             <p className="text-xs text-gray-500">
               Showing all{' '}
-              <span className={`font-semibold ${STATUS_COLOR_MAP[drillDown.status] || 'text-gray-600'}`}>
-                {drillDown.status.toLowerCase()}
+              <span className={`font-semibold ${drillDownStatusLabel === 'attended' ? 'text-green-600' : (STATUS_COLOR_MAP[drillDown.status] || 'text-gray-600')}`}>
+                {drillDownStatusLabel}
               </span>{' '}
               days — {detailMeta.total} record{detailMeta.total !== 1 ? 's' : ''}
             </p>
           </div>
           {/* Filter chips */}
           <div className="hidden sm:flex items-center gap-1">
-            {(['PRESENT', 'ABSENT', 'LATE'] as const).map(s => (
+            {([
+              { value: 'PRESENT', label: 'Present' },
+              { value: 'ABSENT', label: 'Absent' },
+              { value: 'LATE', label: 'Late' },
+            ] as const).map(({ value, label }) => (
               <button
-                key={s}
+                key={value}
                 onClick={() => {
-                  setDrillDown({ ...drillDown, status: s });
-                  fetchDetail(drillDown.termId, s, 1);
+                  const includeLate = value === 'PRESENT';
+                  setDrillDown({ ...drillDown, status: value, includeLate });
+                  fetchDetail(drillDown.termId, value, 1, includeLate);
                 }}
                 className={`px-3 py-1 rounded-full text-xs font-medium transition-colors ${
-                  drillDown.status === s
-                    ? s === 'PRESENT' ? 'bg-green-100 text-green-700' :
-                      s === 'ABSENT' ? 'bg-red-100 text-red-700' :
-                      'bg-yellow-100 text-yellow-700'
+                  isFilterActive(value)
+                    ? value === 'ABSENT'
+                      ? 'bg-red-100 text-red-700'
+                      : value === 'LATE'
+                        ? 'bg-yellow-100 text-yellow-700'
+                        : 'bg-green-100 text-green-700'
                     : 'bg-gray-100 text-gray-500 hover:bg-gray-200'
                 }`}
               >
-                {s.charAt(0) + s.slice(1).toLowerCase()}
+                {label}
               </button>
             ))}
           </div>
@@ -556,7 +666,7 @@ export default function StudentDetailPage() {
             <div className="w-12 h-12 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-3">
               <Calendar className="w-6 h-6 text-gray-400" />
             </div>
-            <p className="text-gray-400 text-sm">No {drillDown.status.toLowerCase()} records found for this term.</p>
+            <p className="text-gray-400 text-sm">No {drillDownStatusLabel} records found for this term.</p>
           </div>
         ) : (
           <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">
@@ -611,6 +721,161 @@ export default function StudentDetailPage() {
     );
   };
 
+  /* ---------- Render: Fees Tab ---------- */
+  const renderFeesTab = () => {
+    const outstandingInvoices = invoices.filter(inv => Number(inv.balance) > 0);
+    const selectedInvoicesList = outstandingInvoices.filter(inv => selectedInvoiceIds.has(inv.id));
+    const totalSelected = selectedInvoicesList.reduce((sum, inv) => sum + Number(inv.balance), 0);
+    const allOutstandingSelected = outstandingInvoices.length > 0 && outstandingInvoices.every(inv => selectedInvoiceIds.has(inv.id));
+
+    const toggleInvoice = (invId: string) => {
+      setSelectedInvoiceIds(prev => {
+        const next = new Set(prev);
+        if (next.has(invId)) next.delete(invId);
+        else next.add(invId);
+        return next;
+      });
+    };
+
+    const toggleAll = () => {
+      if (allOutstandingSelected) {
+        setSelectedInvoiceIds(new Set());
+      } else {
+        setSelectedInvoiceIds(new Set(outstandingInvoices.map(inv => inv.id)));
+      }
+    };
+
+    const totalInvoicePages = Math.ceil(invoices.length / INVOICES_PER_PAGE);
+    const paginatedInvoices = invoices.slice((invoicePage - 1) * INVOICES_PER_PAGE, invoicePage * INVOICES_PER_PAGE);
+
+    return (
+      <div>
+        {/* Bulk payment action bar */}
+        {canManage && selectedInvoiceIds.size > 0 && (
+          <div className="mb-3 flex items-center justify-between bg-green-50 border border-green-200 rounded-lg px-4 py-3">
+            <div className="flex items-center gap-3">
+              <span className="text-sm font-medium text-green-800">
+                {selectedInvoiceIds.size} invoice{selectedInvoiceIds.size !== 1 ? 's' : ''} selected
+              </span>
+              <span className="text-sm text-green-700">
+                Total: <span className="font-bold">{formatCurrency(totalSelected)}</span>
+              </span>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setSelectedInvoiceIds(new Set())}
+                className="text-xs text-green-600 hover:text-green-800 underline"
+              >
+                Clear
+              </button>
+              <button
+                onClick={() => setBulkPaymentOpen(true)}
+                className="flex items-center gap-1.5 bg-[#16a34a] hover:bg-green-700 text-white px-4 py-2 rounded-lg text-sm font-medium"
+              >
+                <CreditCard className="w-4 h-4" />
+                Bulk Payment
+              </button>
+            </div>
+          </div>
+        )}
+
+        <div className="overflow-x-auto">
+          {invoices.length === 0 ? (
+            <p className="text-gray-400 text-sm py-4">No invoices found.</p>
+          ) : (
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="bg-gray-50 border-b">
+                  {canManage && outstandingInvoices.length > 0 && (
+                    <th className="px-4 py-3 w-8">
+                      <input
+                        type="checkbox"
+                        checked={allOutstandingSelected}
+                        onChange={toggleAll}
+                        className="w-4 h-4 accent-[#16a34a] cursor-pointer"
+                        title="Select all outstanding invoices"
+                      />
+                    </th>
+                  )}
+                  {canManage && outstandingInvoices.length === 0 && <th className="px-4 py-3 w-8" />}
+                  <th className="text-left px-4 py-3 text-xs text-gray-400 font-medium">Invoice #</th>
+                  <th className="text-left px-4 py-3 text-xs text-gray-400 font-medium">Fee Type</th>
+                  <th className="text-left px-4 py-3 text-xs text-gray-400 font-medium">Total</th>
+                  <th className="text-left px-4 py-3 text-xs text-gray-400 font-medium">Paid</th>
+                  <th className="text-left px-4 py-3 text-xs text-gray-400 font-medium">Balance</th>
+                  <th className="text-left px-4 py-3 text-xs text-gray-400 font-medium">Status</th>
+                  <th className="text-left px-4 py-3 text-xs text-gray-400 font-medium">Due Date</th>
+                  {canManage && <th className="text-left px-4 py-3 text-xs text-gray-400 font-medium">Actions</th>}
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {paginatedInvoices.map(inv => {
+                  const hasBalance = Number(inv.balance) > 0;
+                  const isChecked = selectedInvoiceIds.has(inv.id);
+                  return (
+                    <tr key={inv.id} className={`hover:bg-gray-50 ${isChecked ? 'bg-green-50' : ''}`}>
+                      {canManage && (
+                        <td className="px-4 py-3 w-8">
+                          {hasBalance ? (
+                            <input
+                              type="checkbox"
+                              checked={isChecked}
+                              onChange={() => toggleInvoice(inv.id)}
+                              className="w-4 h-4 accent-[#16a34a] cursor-pointer"
+                            />
+                          ) : (
+                            <span className="inline-block w-4 h-4" />
+                          )}
+                        </td>
+                      )}
+                      <td className="px-4 py-3 font-mono text-xs">INV-{inv.id.slice(-6).toUpperCase()}</td>
+                      <td className="px-4 py-3">{inv.feeOrder?.title || '—'}</td>
+                      <td className="px-4 py-3">{formatCurrency(inv.amountDue)}</td>
+                      <td className="px-4 py-3 text-green-700">{formatCurrency(inv.amountPaid)}</td>
+                      <td className="px-4 py-3 text-red-600">{formatCurrency(inv.balance)}</td>
+                      <td className="px-4 py-3"><PaymentStatusBadge status={inv.status} /></td>
+                      <td className="px-4 py-3">{formatDate(inv.dueDate)}</td>
+                      {canManage && (
+                        <td className="px-4 py-3">
+                          <div className="flex items-center gap-2">
+                            {hasBalance && (
+                              <button
+                                onClick={() => setPaymentModal({ open: true, invoiceId: inv.id, studentId: inv.studentId, balance: inv.balance })}
+                                className="text-xs bg-[#16a34a] hover:bg-green-700 text-white px-3 py-1 rounded-md"
+                              >
+                                Record Payment
+                              </button>
+                            )}
+                            <button
+                              onClick={() => setPrintModal({ open: true, invoice: inv })}
+                              className="p-1.5 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded"
+                              title="Print invoice"
+                            >
+                              <Printer className="w-4 h-4" />
+                            </button>
+                          </div>
+                        </td>
+                      )}
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          )}
+        </div>
+        {totalInvoicePages > 1 && (
+          <div className="flex items-center justify-between px-4 py-3 border-t border-gray-100">
+            <p className="text-sm text-gray-500">Page {invoicePage} of {totalInvoicePages} ({invoices.length} total)</p>
+            <div className="flex gap-1">
+              <button onClick={() => setInvoicePage(p => p - 1)} disabled={invoicePage <= 1} className="px-3 py-1.5 text-sm border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-40">Previous</button>
+              <button onClick={() => setInvoicePage(p => p + 1)} disabled={invoicePage >= totalInvoicePages} className="px-3 py-1.5 text-sm border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-40">Next</button>
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  };
+
   return (
     <div className="p-8 max-w-4xl">
       <div className="flex items-center gap-3 mb-6">
@@ -643,6 +908,8 @@ export default function StudentDetailPage() {
           { label: 'Guardian Phone', value: student.guardianPhone },
           { label: 'Guardian Email', value: student.guardianEmail || '—' },
           { label: 'Address', value: student.guardianAddress || '—' },
+          ...(student.secondaryGuardianName ? [{ label: 'Secondary Guardian', value: student.secondaryGuardianName }] : []),
+          ...(student.secondaryGuardianPhone ? [{ label: 'Secondary Guardian Phone', value: student.secondaryGuardianPhone }] : []),
         ]}
       />
 
@@ -666,62 +933,7 @@ export default function StudentDetailPage() {
       </div>
 
       <div className="mt-4">
-        {activeTab === 'fees' && (
-          <div className="overflow-x-auto">
-            {invoices.length === 0 ? (
-              <p className="text-gray-400 text-sm py-4">No invoices found.</p>
-            ) : (
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="bg-gray-50 border-b">
-                    <th className="text-left px-4 py-3 text-xs text-gray-400 font-medium">Invoice #</th>
-                    <th className="text-left px-4 py-3 text-xs text-gray-400 font-medium">Fee Type</th>
-                    <th className="text-left px-4 py-3 text-xs text-gray-400 font-medium">Total</th>
-                    <th className="text-left px-4 py-3 text-xs text-gray-400 font-medium">Paid</th>
-                    <th className="text-left px-4 py-3 text-xs text-gray-400 font-medium">Balance</th>
-                    <th className="text-left px-4 py-3 text-xs text-gray-400 font-medium">Status</th>
-                    <th className="text-left px-4 py-3 text-xs text-gray-400 font-medium">Due Date</th>
-                    {canManage && <th className="text-left px-4 py-3 text-xs text-gray-400 font-medium">Actions</th>}
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-100">
-                  {invoices.map(inv => (
-                    <tr key={inv.id} className="hover:bg-gray-50">
-                      <td className="px-4 py-3 font-mono text-xs">INV-{inv.id.slice(-6).toUpperCase()}</td>
-                      <td className="px-4 py-3">{inv.feeOrder?.title || '—'}</td>
-                      <td className="px-4 py-3">{formatCurrency(inv.amountDue)}</td>
-                      <td className="px-4 py-3 text-green-700">{formatCurrency(inv.amountPaid)}</td>
-                      <td className="px-4 py-3 text-red-600">{formatCurrency(inv.balance)}</td>
-                      <td className="px-4 py-3"><PaymentStatusBadge status={inv.status} /></td>
-                      <td className="px-4 py-3">{formatDate(inv.dueDate)}</td>
-                      {canManage && (
-                        <td className="px-4 py-3">
-                          <div className="flex items-center gap-2">
-                            {inv.balance > 0 && (
-                              <button
-                                onClick={() => setPaymentModal({ open: true, invoiceId: inv.id, studentId: inv.studentId, balance: inv.balance })}
-                                className="text-xs bg-[#16a34a] hover:bg-green-700 text-white px-3 py-1 rounded-md"
-                              >
-                                Record Payment
-                              </button>
-                            )}
-                            <button
-                              onClick={() => setPrintModal({ open: true, invoice: inv })}
-                              className="p-1.5 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded"
-                              title="Print invoice"
-                            >
-                              <Printer className="w-4 h-4" />
-                            </button>
-                          </div>
-                        </td>
-                      )}
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            )}
-          </div>
-        )}
+        {activeTab === 'fees' && renderFeesTab()}
 
         {activeTab === 'attendance' && !drillDown && (
           <div>
@@ -743,15 +955,26 @@ export default function StudentDetailPage() {
               </div>
             ) : (
               <div className="space-y-2">
-                {/* Active term progress card */}
+                {/* Active term progress card — always shown */}
                 {activeTerm && renderActiveTermCard(activeTerm)}
 
-                {/* Past terms archive table */}
-                {renderPastTermsTable(pagedClosedTerms)}
+                {/* Past terms archive table — paginated */}
+                {renderPastTermsTable(paginatedTermSummaryData.paginatedClosedTerms)}
 
-                {/* Edge case: no active term but has data */}
+                {/* Edge case: no active term and no closed terms */}
                 {!activeTerm && closedTerms.length === 0 && (
                   <p className="text-gray-400 text-sm py-4">No attendance data available.</p>
+                )}
+
+                {/* Term summaries pagination */}
+                {paginatedTermSummaryData.totalTermPages > 1 && (
+                  <div className="flex items-center justify-between px-4 py-3 border-t border-gray-100 mt-4">
+                    <p className="text-sm text-gray-500">Page {termSummaryPage} of {paginatedTermSummaryData.totalTermPages} ({closedTerms.length} total)</p>
+                    <div className="flex gap-1">
+                      <button onClick={() => setTermSummaryPage(p => p - 1)} disabled={termSummaryPage <= 1} className="px-3 py-1.5 text-sm border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-40">Previous</button>
+                      <button onClick={() => setTermSummaryPage(p => p + 1)} disabled={termSummaryPage >= paginatedTermSummaryData.totalTermPages} className="px-3 py-1.5 text-sm border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-40">Next</button>
+                    </div>
+                  </div>
                 )}
               </div>
             )}
@@ -768,6 +991,21 @@ export default function StudentDetailPage() {
         studentId={paymentModal.studentId}
         balance={paymentModal.balance}
         onSuccess={fetchStudent}
+      />
+
+      <BulkPaymentModal
+        isOpen={bulkPaymentOpen}
+        onClose={() => setBulkPaymentOpen(false)}
+        studentId={student.id}
+        studentName={`${student.firstName} ${student.lastName}`}
+        studentCode={student.studentId}
+        selectedInvoices={invoices
+          .filter(inv => selectedInvoiceIds.has(inv.id) && Number(inv.balance) > 0)
+          .map(inv => ({ id: inv.id, feeOrderTitle: inv.feeOrder?.title || '—', balance: Number(inv.balance) }))}
+        onSuccess={() => {
+          setSelectedInvoiceIds(new Set());
+          fetchStudent();
+        }}
       />
 
       {printModal.invoice && (

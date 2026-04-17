@@ -17,6 +17,8 @@ const schema = z.object({
   guardianPhone: z.string().min(1, 'Guardian phone is required'),
   guardianEmail: z.string().email('Invalid email').optional().or(z.literal('')), 
   guardianAddress: z.string().optional(),
+  secondaryGuardianName: z.string().optional(),
+  secondaryGuardianPhone: z.string().optional(),
 });
 
 type FormData = z.infer<typeof schema>;
@@ -55,6 +57,8 @@ export default function EditStudentPage() {
         guardianPhone: s.guardianPhone,
         guardianEmail: s.guardianEmail || '',
         guardianAddress: s.guardianAddress || '',
+        secondaryGuardianName: s.secondaryGuardianName || '',
+        secondaryGuardianPhone: s.secondaryGuardianPhone || '',
       });
     } catch {
       setError('Failed to load student data');
@@ -75,6 +79,8 @@ export default function EditStudentPage() {
         ...data,
         guardianEmail: data.guardianEmail || undefined,
         guardianAddress: data.guardianAddress || undefined,
+        secondaryGuardianName: data.secondaryGuardianName || undefined,
+        secondaryGuardianPhone: data.secondaryGuardianPhone || undefined,
       };
       await api.patch(`/students/${id}`, payload);
 
@@ -122,7 +128,7 @@ export default function EditStudentPage() {
       )}
 
       <form onSubmit={handleSubmit(onSubmit)} className="bg-white rounded-xl border border-gray-200 p-6 space-y-5">
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">First Name *</label>
             <input {...register('firstName')} className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#16a34a]" />
@@ -135,7 +141,7 @@ export default function EditStudentPage() {
           </div>
         </div>
 
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Date of Birth *</label>
             <input type="date" {...register('dateOfBirth')} className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#16a34a]" />
@@ -163,7 +169,7 @@ export default function EditStudentPage() {
         <hr className="border-gray-100" />
         <h3 className="text-sm font-semibold text-gray-700">Guardian Information</h3>
 
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Guardian Name *</label>
             <input {...register('guardianName')} className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#16a34a]" />
@@ -185,6 +191,20 @@ export default function EditStudentPage() {
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-1">Guardian Address</label>
           <textarea {...register('guardianAddress')} rows={2} className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#16a34a] resize-none" />
+        </div>
+
+        <hr className="border-gray-100" />
+        <h3 className="text-sm font-semibold text-gray-700">Secondary Guardian <span className="text-gray-400 font-normal">(optional)</span></h3>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Secondary Guardian Name</label>
+            <input {...register('secondaryGuardianName')} className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#16a34a]" />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Secondary Guardian Phone</label>
+            <input {...register('secondaryGuardianPhone')} className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#16a34a]" />
+          </div>
         </div>
 
         <div>

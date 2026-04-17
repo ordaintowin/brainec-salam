@@ -39,8 +39,10 @@ export class StudentsController {
     @Query('page', new DefaultValuePipe(1), ParseIntPipe) page: number,
     @Query('limit', new DefaultValuePipe(10), ParseIntPipe) limit: number,
     @Query('q') q?: string,
+    @CurrentUser() user?: any,
   ) {
-    return this.studentsService.findAll(page, limit, q);
+    const classId = user?.role === 'TEACHER' ? (user?.teacher?.classId ?? undefined) : undefined;
+    return this.studentsService.findAll(page, limit, q, classId);
   }
 
   @Get('archived')
@@ -52,8 +54,9 @@ export class StudentsController {
   }
 
   @Get(':id')
-  findOne(@Param('id') id: string) {
-    return this.studentsService.findOne(id);
+  findOne(@Param('id') id: string, @CurrentUser() user?: any) {
+    const teacherClassId = user?.role === 'TEACHER' ? (user?.teacher?.classId ?? undefined) : undefined;
+    return this.studentsService.findOne(id, teacherClassId);
   }
 
   @Patch(':id')
@@ -91,18 +94,23 @@ export class StudentsController {
   }
 
   @Get(':id/attendance-history')
-  getAttendanceHistory(@Param('id') id: string) {
+  async getAttendanceHistory(@Param('id') id: string, @CurrentUser() user?: any) {
+    const teacherClassId = user?.role === 'TEACHER' ? (user?.teacher?.classId ?? undefined) : undefined;
+    await this.studentsService.findOne(id, teacherClassId);
     return this.studentsService.getAttendanceHistory(id);
   }
 
   @Get(':id/attendance-history/:termId')
-  getAttendanceDetail(
+  async getAttendanceDetail(
     @Param('id') id: string,
     @Param('termId') termId: string,
     @Query('status') status?: string,
     @Query('page', new DefaultValuePipe(1), ParseIntPipe) page?: number,
     @Query('limit', new DefaultValuePipe(10), ParseIntPipe) limit?: number,
+    @CurrentUser() user?: any,
   ) {
+    const teacherClassId = user?.role === 'TEACHER' ? (user?.teacher?.classId ?? undefined) : undefined;
+    await this.studentsService.findOne(id, teacherClassId);
     return this.studentsService.getAttendanceDetail(id, termId, status, page, limit);
   }
 }

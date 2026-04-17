@@ -13,13 +13,15 @@ import RecordPaymentModal from '@/components/RecordPaymentModal';
 import PrintInvoiceModal from '@/components/PrintInvoiceModal';
 import { formatCurrency, formatDate, exportToCSV } from '@/lib/utils';
 
-type ActiveTab = 'feeOrders' | 'invoices' | 'payments' | 'summary';
+type ActiveTab = 'feeOrders' | 'invoices' | 'payments' | 'summary' | 'archives';
 
 interface FeeOrder {
   id: string;
   title: string;
   amount: number;
   dueDate: string;
+  archivedAt?: string;
+  type?: 'CLASS' | 'INDIVIDUAL' | 'ALL';
   class?: { name: string };
   _count?: { invoices: number };
 }
@@ -83,6 +85,11 @@ export default function FinancePage() {
   const { user } = useAuth();
   const [activeTab, setActiveTab] = useState<ActiveTab>('feeOrders');
   const [feeOrders, setFeeOrders] = useState<FeeOrder[]>([]);
+  const [archivedFeeOrders, setArchivedFeeOrders] = useState<FeeOrder[]>([]);
+  const [archivedFeeOrdersPage, setArchivedFeeOrdersPage] = useState(1);
+  const [archivedFeeOrdersTotalPages, setArchivedFeeOrdersTotalPages] = useState(1);
+  const [archivedSearch, setArchivedSearch] = useState('');
+  const [archivedLoading, setArchivedLoading] = useState(false);
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [payments, setPayments] = useState<Payment[]>([]);
   const [summary, setSummary] = useState<FinanceSummary | null>(null);
@@ -93,6 +100,9 @@ export default function FinancePage() {
   const [feeOrderTotalPages, setFeeOrderTotalPages] = useState(1);
   const [invoicePage, setInvoicePage] = useState(1);
   const [invoiceTotalPages, setInvoiceTotalPages] = useState(1);
+  const [paymentSearch, setPaymentSearch] = useState('');
+  const [paymentPage, setPaymentPage] = useState(1);
+  const [paymentTotalPages, setPaymentTotalPages] = useState(1);
   const [loading, setLoading] = useState(true);
   const [showFeeOrderModal, setShowFeeOrderModal] = useState(false);
   const [feeOrderError, setFeeOrderError] = useState('');
@@ -122,8 +132,12 @@ export default function FinancePage() {
     register,
     handleSubmit,
     reset: resetFeeForm,
+    watch,
+    setValue,
     formState: { errors: feeErrors, isSubmitting: feeSubmitting },
   } = useForm<FeeOrderForm>({ resolver: zodResolver(feeOrderSchema) });
+
+  const watchApplyToAll = watch('applyToAll');
 
   const canManage = user?.role === 'HEADMISTRESS' || user?.role === 'ADMIN';
 
@@ -161,12 +175,13 @@ export default function FinancePage() {
 
   const fetchPayments = useCallback(async () => {
     try {
-      const res = await api.get('/finance/payments', { params: { limit: 50 } });
+      const res = await api.get('/finance/payments', { params: { q: paymentSearch, page: paymentPage, limit: 20 } });
       setPayments(res.data?.data || res.data || []);
+      setPaymentTotalPages(res.data?.meta?.totalPages || 1);
     } catch {
       setPayments([]);
     }
-  }, []);
+  }, [paymentSearch, paymentPage]);
 
   const fetchSummary = useCallback(async () => {
     try {
@@ -176,6 +191,25 @@ export default function FinancePage() {
       setSummary(null);
     }
   }, []);
+
+  const fetchArchivedFeeOrders = useCallback(async () => {
+    setArchivedLoading(true);
+    try {
+      const res = await api.get('/finance/fee-orders/archived', { params: { q: archivedSearch, page: archivedFeeOrdersPage, limit: 20 } });
+      setArchivedFeeOrders(res.data?.data || res.data || []);
+      setArchivedFeeOrdersTotalPages(res.data?.meta?.totalPages || 1);
+    } catch {
+      setArchivedFeeOrders([]);
+    } finally {
+      setArchivedLoading(false);
+    }
+  }, [archivedSearch, archivedFeeOrdersPage]);
+
+  const handlePaymentSuccess = useCallback(() => {
+    fetchInvoices();
+    fetchFeeOrders();
+    fetchSummary();
+  }, [fetchInvoices, fetchFeeOrders, fetchSummary]);
 
   useEffect(() => {
     fetchFeeOrders();
@@ -198,12 +232,58 @@ export default function FinancePage() {
   }, [activeTab, fetchSummary]);
 
   useEffect(() => {
+    if (activeTab === 'archives') fetchArchivedFeeOrders();
+  }, [activeTab, fetchArchivedFeeOrders]);
+
+  useEffect(() => {
     setInvoicePage(1);
   }, [search]);
 
   useEffect(() => {
     setFeeOrderPage(1);
   }, [feeOrderSearch]);
+
+  useEffect(() => {
+    setArchivedFeeOrdersPage(1);
+  }, [archivedSearch]);
+
+  useEffect(() => {
+    setPaymentPage(1);
+  }, [paymentSearch]);
+
+  // Debounced live search for individual students
+  useEffect(() => {
+    if (!studentSearch.trim()) {
+      setStudentResults([]);
+      return;
+    }
+    const timer = setTimeout(async () => {
+      setStudentSearchLoading(true);
+      try {
+        const res = await api.get('/students', { params: { q: studentSearch, limit: 20 } });
+        const students: StudentOption[] = res.data?.students || res.data?.data || res.data || [];
+        setStudentResults(students);
+      } catch {
+        setStudentResults([]);
+      } finally {
+        setStudentSearchLoading(false);
+      }
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [studentSearch]);
+
+  const addStudent = (student: StudentOption) => {
+    setSelectedStudents(prev => {
+      if (prev.find(s => s.id === student.id)) return prev;
+      return [...prev, student];
+    });
+    setStudentSearch('');
+    setStudentResults([]);
+  };
+
+  const removeStudent = (id: string) => {
+    setSelectedStudents(prev => prev.filter(s => s.id !== id));
+  };
 
   const onCreateFeeOrder = async (data: FeeOrderForm) => {
     setFeeOrderError('');
@@ -215,8 +295,12 @@ export default function FinancePage() {
       };
       if (orderMode === 'individual' && selectedStudents.length > 0) {
         payload.studentIds = selectedStudents.map(s => s.id);
+        payload.type = 'INDIVIDUAL';
+      } else if (data.applyToAll) {
+        payload.type = 'ALL';
       } else {
         payload.classId = data.classId || undefined;
+        payload.type = 'CLASS';
       }
       await api.post('/finance/fee-orders', payload);
       setShowFeeOrderModal(false);
@@ -233,6 +317,7 @@ export default function FinancePage() {
     { key: 'invoices', label: 'Invoices' },
     { key: 'payments', label: 'Payments' },
     { key: 'summary', label: 'Summary' },
+    { key: 'archives', label: 'Archives' },
   ];
 
   return (
@@ -343,9 +428,13 @@ export default function FinancePage() {
                         <td className="px-4 py-3 font-medium text-gray-800">{fo.title}</td>
                         <td className="px-4 py-3 text-[#16a34a] font-medium">{formatCurrency(fo.amount)}</td>
                         <td className="px-4 py-3">
-                          <span className={`px-2 py-0.5 rounded text-xs font-medium ${fo.class ? 'bg-blue-50 text-blue-700' : 'bg-purple-50 text-purple-700'}`}>
-                            {fo.class ? 'Class' : 'Individual'}
-                          </span>
+                          {fo.type === 'CLASS' || (!fo.type && fo.class) ? (
+                            <span className="px-2 py-0.5 rounded text-xs font-medium bg-blue-50 text-blue-700">Class</span>
+                          ) : fo.type === 'INDIVIDUAL' ? (
+                            <span className="px-2 py-0.5 rounded text-xs font-medium bg-orange-50 text-orange-700">Individual</span>
+                          ) : (
+                            <span className="px-2 py-0.5 rounded text-xs font-medium bg-purple-50 text-purple-700">All</span>
+                          )}
                         </td>
                         <td className="px-4 py-3 text-gray-600">{fo.class?.name || '—'}</td>
                         <td className="px-4 py-3 text-gray-600">{formatDate(fo.dueDate)}</td>
@@ -454,7 +543,11 @@ export default function FinancePage() {
 
       {/* Payments Tab */}
       {activeTab === 'payments' && (
-        <div className="overflow-x-auto rounded-lg border border-gray-200">
+        <div>
+          <div className="mb-4 max-w-sm">
+            <LiveSearch value={paymentSearch} onChange={setPaymentSearch} placeholder="Search by student name or reference…" />
+          </div>
+          <div className="overflow-x-auto rounded-lg border border-gray-200">
           <table className="w-full text-sm">
             <thead>
               <tr className="bg-gray-50 border-b">
@@ -502,6 +595,16 @@ export default function FinancePage() {
               )}
             </tbody>
           </table>
+          </div>
+          {paymentTotalPages > 1 && (
+            <div className="flex items-center justify-between px-4 py-3 border-t border-gray-100">
+              <p className="text-sm text-gray-500">Page {paymentPage} of {paymentTotalPages}</p>
+              <div className="flex gap-1">
+                <button onClick={() => setPaymentPage(p => p - 1)} disabled={paymentPage <= 1} className="px-3 py-1.5 text-sm border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-40">Previous</button>
+                <button onClick={() => setPaymentPage(p => p + 1)} disabled={paymentPage >= paymentTotalPages} className="px-3 py-1.5 text-sm border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-40">Next</button>
+              </div>
+            </div>
+          )}
         </div>
       )}
 
@@ -592,7 +695,7 @@ export default function FinancePage() {
 
                           {isExpanded && (
                             <div className="px-5 pb-5 border-t border-gray-100 pt-4">
-                              <div className="grid grid-cols-3 gap-3">
+                              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
                                 <div className="bg-gray-50 rounded-lg p-3 text-center">
                                   <p className="text-xs text-gray-400 uppercase">To Collect</p>
                                   <p className="text-lg font-bold text-gray-800">{formatCurrency(fo.totalToCollect)}</p>
@@ -634,6 +737,85 @@ export default function FinancePage() {
         </div>
       )}
 
+      {/* Archives Tab */}
+      {activeTab === 'archives' && (
+        <div>
+          <div className="mb-4 flex items-center justify-between">
+            <div>
+              <h2 className="text-base font-semibold text-gray-800">Archived Fee Orders</h2>
+              <p className="text-sm text-gray-400 mt-0.5">Orders where all students have fully paid. Excluded from dashboard totals.</p>
+            </div>
+          </div>
+          <div className="mb-4 max-w-sm">
+            <LiveSearch value={archivedSearch} onChange={setArchivedSearch} placeholder="Search archived orders…" />
+          </div>
+          {archivedLoading ? (
+            <div className="space-y-3">{[...Array(4)].map((_, i) => <div key={i} className="h-12 bg-gray-100 rounded animate-pulse" />)}</div>
+          ) : (
+            <div className="overflow-x-auto rounded-lg border border-gray-200">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="bg-gray-50 border-b">
+                    <th className="text-left px-4 py-3 text-xs text-gray-400 font-medium uppercase">Name</th>
+                    <th className="text-left px-4 py-3 text-xs text-gray-400 font-medium uppercase">Amount</th>
+                    <th className="text-left px-4 py-3 text-xs text-gray-400 font-medium uppercase">Type</th>
+                    <th className="text-left px-4 py-3 text-xs text-gray-400 font-medium uppercase">Class</th>
+                    <th className="text-left px-4 py-3 text-xs text-gray-400 font-medium uppercase">Due Date</th>
+                    <th className="text-left px-4 py-3 text-xs text-gray-400 font-medium uppercase">Invoices</th>
+                    <th className="text-left px-4 py-3 text-xs text-gray-400 font-medium uppercase">Archived On</th>
+                    <th className="text-left px-4 py-3 text-xs text-gray-400 font-medium uppercase">Details</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100">
+                  {archivedFeeOrders.length === 0 ? (
+                    <tr><td colSpan={8} className="px-4 py-8 text-center text-gray-400">No archived fee orders found.</td></tr>
+                  ) : (
+                    archivedFeeOrders.map(fo => (
+                      <tr key={fo.id} className="hover:bg-gray-50">
+                        <td className="px-4 py-3 font-medium text-gray-800">{fo.title}</td>
+                        <td className="px-4 py-3 text-[#16a34a] font-medium">{formatCurrency(fo.amount)}</td>
+                        <td className="px-4 py-3">
+                          {fo.type === 'CLASS' || (!fo.type && fo.class) ? (
+                            <span className="px-2 py-0.5 rounded text-xs font-medium bg-blue-50 text-blue-700">Class</span>
+                          ) : fo.type === 'INDIVIDUAL' ? (
+                            <span className="px-2 py-0.5 rounded text-xs font-medium bg-orange-50 text-orange-700">Individual</span>
+                          ) : (
+                            <span className="px-2 py-0.5 rounded text-xs font-medium bg-purple-50 text-purple-700">All</span>
+                          )}
+                        </td>
+                        <td className="px-4 py-3 text-gray-600">{fo.class?.name || '—'}</td>
+                        <td className="px-4 py-3 text-gray-600">{formatDate(fo.dueDate)}</td>
+                        <td className="px-4 py-3 text-gray-600">{fo._count?.invoices ?? 0}</td>
+                        <td className="px-4 py-3 text-gray-500">{fo.archivedAt ? formatDate(fo.archivedAt) : '—'}</td>
+                        <td className="px-4 py-3">
+                          <Link
+                            href={`/dashboard/finance/orders/${fo.id}`}
+                            className="text-xs text-[#16a34a] hover:underline font-medium"
+                          >
+                            View
+                          </Link>
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {/* Archives Pagination */}
+          {archivedFeeOrdersTotalPages > 1 && (
+            <div className="flex items-center justify-between mt-4">
+              <p className="text-sm text-gray-500">Page {archivedFeeOrdersPage} of {archivedFeeOrdersTotalPages}</p>
+              <div className="flex gap-1">
+                <button onClick={() => setArchivedFeeOrdersPage(p => p - 1)} disabled={archivedFeeOrdersPage <= 1} className="px-3 py-1.5 text-sm border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-40">Previous</button>
+                <button onClick={() => setArchivedFeeOrdersPage(p => p + 1)} disabled={archivedFeeOrdersPage >= archivedFeeOrdersTotalPages} className="px-3 py-1.5 text-sm border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-40">Next</button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Create Fee Order Modal */}
       {showFeeOrderModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center">
@@ -650,7 +832,7 @@ export default function FinancePage() {
                 <input {...register('name')} className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#16a34a]" placeholder="e.g. Term 1 School Fees" />
                 {feeErrors.name && <p className="text-red-500 text-xs mt-1">{feeErrors.name.message}</p>}
               </div>
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Amount (₵) *</label>
                   <input type="number" step="0.01" {...register('amount')} className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#16a34a]" />
@@ -696,13 +878,30 @@ export default function FinancePage() {
                 <>
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">Select Class</label>
-                    <select {...register('classId')} className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#16a34a]">
+                    <select
+                      {...register('classId')}
+                      disabled={!!watchApplyToAll}
+                      onChange={e => {
+                        if (e.target.value) setValue('applyToAll', false);
+                        register('classId').onChange(e);
+                      }}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#16a34a] disabled:bg-gray-100 disabled:text-gray-400"
+                    >
                       <option value="">Select a class…</option>
                       {classes.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
                     </select>
                   </div>
                   <div className="flex items-center gap-2">
-                    <input type="checkbox" id="applyToAll" {...register('applyToAll')} className="w-4 h-4 accent-[#16a34a]" />
+                    <input
+                      type="checkbox"
+                      id="applyToAll"
+                      {...register('applyToAll')}
+                      onChange={e => {
+                        if (e.target.checked) setValue('classId', '');
+                        register('applyToAll').onChange(e);
+                      }}
+                      className="w-4 h-4 accent-[#16a34a]"
+                    />
                     <label htmlFor="applyToAll" className="text-sm text-gray-700">Apply to all students (all classes)</label>
                   </div>
                 </>
@@ -782,7 +981,7 @@ export default function FinancePage() {
         invoiceId={paymentModal.invoiceId}
         studentId={paymentModal.studentId}
         balance={paymentModal.balance}
-        onSuccess={fetchInvoices}
+        onSuccess={handlePaymentSuccess}
       />
 
       {printModal.invoice && (

@@ -1,6 +1,6 @@
 'use client';
 import { useEffect, useState, useCallback } from 'react';
-import { Plus, X, Loader2, ToggleLeft, ToggleRight, Eye, EyeOff, KeyRound } from 'lucide-react';
+import { Plus, X, Loader2, ToggleLeft, ToggleRight, Eye, EyeOff, KeyRound, Trash2, Pencil } from 'lucide-react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
@@ -32,15 +32,24 @@ const resetSchema = z.object({
 });
 type ResetFormData = z.infer<typeof resetSchema>;
 
+const editSchema = z.object({
+  name: z.string().min(1, 'Name is required'),
+  email: z.string().email('Invalid email'),
+});
+type EditFormData = z.infer<typeof editSchema>;
+
 export default function AdminsPage() {
   const { user } = useAuth();
   const [admins, setAdmins] = useState<Admin[]>([]);
   const [loading, setLoading] = useState(true);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [resetModal, setResetModal] = useState<{ open: boolean; admin: Admin | null }>({ open: false, admin: null });
+  const [editModal, setEditModal] = useState<{ open: boolean; admin: Admin | null }>({ open: false, admin: null });
   const [formError, setFormError] = useState('');
   const [resetError, setResetError] = useState('');
+  const [editError, setEditError] = useState('');
   const [toggleLoading, setToggleLoading] = useState<string | null>(null);
+  const [deleteLoading, setDeleteLoading] = useState<string | null>(null);
   const [showCreatePwd, setShowCreatePwd] = useState(false);
   const [showResetPwd, setShowResetPwd] = useState(false);
   const [successMsg, setSuccessMsg] = useState('');
@@ -58,6 +67,13 @@ export default function AdminsPage() {
     reset: resetResetForm,
     formState: { errors: resetErrors, isSubmitting: resetSubmitting },
   } = useForm<ResetFormData>({ resolver: zodResolver(resetSchema) });
+
+  const {
+    register: registerEdit,
+    handleSubmit: handleEditSubmit,
+    reset: resetEditForm,
+    formState: { errors: editErrors, isSubmitting: editSubmitting },
+  } = useForm<EditFormData>({ resolver: zodResolver(editSchema) });
 
   const fetchAdmins = useCallback(async () => {
     setLoading(true);
@@ -111,6 +127,27 @@ export default function AdminsPage() {
     }
   };
 
+  const onEditSubmit = async (data: EditFormData) => {
+    if (!editModal.admin) return;
+    setEditError('');
+    try {
+      await api.patch(`/users/${editModal.admin.id}`, { name: data.name, email: data.email });
+      setEditModal({ open: false, admin: null });
+      resetEditForm();
+      setSuccessMsg(`Details updated for ${data.name}.`);
+      fetchAdmins();
+    } catch (err: unknown) {
+      const message = (err as { response?: { data?: { message?: string } } })?.response?.data?.message || 'Failed to update admin details';
+      setEditError(message);
+    }
+  };
+
+  const handleEditClick = (admin: Admin) => {
+    setEditModal({ open: true, admin });
+    setEditError('');
+    resetEditForm({ name: admin.name, email: admin.email });
+  };
+
   const toggleActive = async (adminId: string, currentlyActive: boolean) => {
     setToggleLoading(adminId);
     try {
@@ -120,6 +157,21 @@ export default function AdminsPage() {
       // silent
     } finally {
       setToggleLoading(null);
+    }
+  };
+
+  const deleteAdmin = async (adminId: string, adminName: string) => {
+    if (!confirm(`Are you sure you want to permanently delete ${adminName}? This cannot be undone.`)) return;
+    setDeleteLoading(adminId);
+    try {
+      await api.delete(`/users/${adminId}`);
+      setSuccessMsg(`${adminName} has been deleted.`);
+      fetchAdmins();
+    } catch (err: unknown) {
+      const message = (err as { response?: { data?: { message?: string } } })?.response?.data?.message || 'Failed to delete user';
+      alert(message);
+    } finally {
+      setDeleteLoading(null);
     }
   };
 
@@ -185,7 +237,7 @@ export default function AdminsPage() {
                       <span className={`px-2.5 py-0.5 rounded-full text-xs font-medium ${
                         admin.role === 'HEADMISTRESS' ? 'bg-purple-100 text-purple-700' : 'bg-blue-100 text-blue-700'
                       }`}>
-                        {admin.role === 'HEADMISTRESS' ? 'Headmistress (L1)' : 'Admin (L2)'}
+                        {admin.role === 'HEADMISTRESS' ? 'Admin (L1)' : 'Admin (L2)'}
                       </span>
                     </td>
                     <td className="px-4 py-3 text-gray-500">{formatDate(admin.createdAt)}</td>
@@ -198,6 +250,15 @@ export default function AdminsPage() {
                     </td>
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-2">
+                        {admin.id !== user?.id && user?.role === 'HEADMISTRESS' && (
+                          <button
+                            onClick={() => handleEditClick(admin)}
+                            className="p-1.5 text-gray-500 hover:text-indigo-600 hover:bg-indigo-50 rounded"
+                            title="Edit details"
+                          >
+                            <Pencil className="w-4 h-4" />
+                          </button>
+                        )}
                         <button
                           onClick={() => { setResetModal({ open: true, admin }); setResetError(''); resetResetForm(); setShowResetPwd(false); }}
                           className="p-1.5 text-gray-500 hover:text-blue-600 hover:bg-blue-50 rounded"
@@ -205,7 +266,7 @@ export default function AdminsPage() {
                         >
                           <KeyRound className="w-4 h-4" />
                         </button>
-                        {admin.id !== user?.id && (
+                        {admin.id !== user?.id && user?.role === 'HEADMISTRESS' && (
                           <button
                             onClick={() => toggleActive(admin.id, admin.isActive)}
                             disabled={toggleLoading === admin.id}
@@ -219,6 +280,16 @@ export default function AdminsPage() {
                             ) : (
                               <ToggleLeft className="w-5 h-5 text-gray-400" />
                             )}
+                          </button>
+                        )}
+                        {user?.role === 'HEADMISTRESS' && admin.role !== 'HEADMISTRESS' && (
+                          <button
+                            onClick={() => deleteAdmin(admin.id, admin.name)}
+                            disabled={deleteLoading === admin.id}
+                            className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded transition-colors"
+                            title="Delete account"
+                          >
+                            {deleteLoading === admin.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
                           </button>
                         )}
                       </div>
@@ -270,7 +341,7 @@ export default function AdminsPage() {
                 <label className="block text-sm font-medium text-gray-700 mb-1">Role *</label>
                 <select {...register('role')} className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#16a34a]">
                   <option value="ADMIN">Admin (Level 2)</option>
-                  <option value="HEADMISTRESS">Headmistress (Level 1)</option>
+                  <option value="HEADMISTRESS">Admin (Level 1)</option>
                 </select>
               </div>
               <div className="flex gap-3 justify-end">
@@ -278,6 +349,39 @@ export default function AdminsPage() {
                 <button type="submit" disabled={isSubmitting} className="px-4 py-2 text-sm text-white bg-[#16a34a] hover:bg-green-700 rounded-lg disabled:opacity-60 flex items-center gap-2">
                   {isSubmitting && <Loader2 className="w-4 h-4 animate-spin" />}
                   Create Admin
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Edit Admin Modal */}
+      {editModal.open && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <div className="absolute inset-0 bg-black/50" onClick={() => setEditModal({ open: false, admin: null })} />
+          <div className="relative bg-white rounded-xl shadow-xl p-6 w-full max-w-md mx-4">
+            <div className="flex items-center justify-between mb-5">
+              <h2 className="text-lg font-semibold text-gray-900">Edit Admin Details</h2>
+              <button onClick={() => setEditModal({ open: false, admin: null })} className="text-gray-400 hover:text-gray-600"><X className="w-5 h-5" /></button>
+            </div>
+            {editError && <div className="mb-4 p-3 bg-red-50 border border-red-200 text-red-700 rounded-lg text-sm">{editError}</div>}
+            <form onSubmit={handleEditSubmit(onEditSubmit)} className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Full Name *</label>
+                <input {...registerEdit('name')} className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#16a34a]" />
+                {editErrors.name && <p className="text-red-500 text-xs mt-1">{editErrors.name.message}</p>}
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Email *</label>
+                <input type="email" {...registerEdit('email')} className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#16a34a]" />
+                {editErrors.email && <p className="text-red-500 text-xs mt-1">{editErrors.email.message}</p>}
+              </div>
+              <div className="flex gap-3 justify-end">
+                <button type="button" onClick={() => setEditModal({ open: false, admin: null })} className="px-4 py-2 text-sm text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50">Cancel</button>
+                <button type="submit" disabled={editSubmitting} className="px-4 py-2 text-sm text-white bg-[#16a34a] hover:bg-green-700 rounded-lg disabled:opacity-60 flex items-center gap-2">
+                  {editSubmitting && <Loader2 className="w-4 h-4 animate-spin" />}
+                  Save Changes
                 </button>
               </div>
             </form>

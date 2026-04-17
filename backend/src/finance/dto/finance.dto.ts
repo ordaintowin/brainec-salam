@@ -5,8 +5,21 @@ import {
   IsNumber,
   IsPositive,
   IsArray,
+  IsEnum,
 } from 'class-validator';
 import { Type } from 'class-transformer';
+
+export enum FeeOrderType {
+  CLASS = 'CLASS',
+  INDIVIDUAL = 'INDIVIDUAL',
+  ALL = 'ALL',
+}
+
+enum PaymentMethod {
+  CASH = 'CASH',
+  BANK_TRANSFER = 'BANK_TRANSFER',
+  MOBILE_MONEY = 'MOBILE_MONEY',
+}
 
 export class CreateFeeOrderDto {
   @IsString()
@@ -23,6 +36,10 @@ export class CreateFeeOrderDto {
 
   @IsDateString()
   dueDate: string;
+
+  @IsEnum(FeeOrderType)
+  @IsOptional()
+  type?: FeeOrderType;
 
   @IsString()
   @IsOptional()
@@ -47,6 +64,34 @@ export class RecordPaymentDto {
   amount: number;
 
   @IsString()
+  method: string;
+
+  @IsString()
+  @IsOptional()
+  reference?: string;
+
+  @IsString()
+  paidBy: string;
+
+  @IsString()
+  @IsOptional()
+  notes?: string;
+}
+
+export class BulkPaymentDto {
+  @IsString()
+  studentId: string;
+
+  @IsArray()
+  @IsString({ each: true })
+  invoiceIds: string[];
+
+  @IsNumber()
+  @IsPositive()
+  @Type(() => Number)
+  amount: number;
+
+  @IsEnum(PaymentMethod)
   method: string;
 
   @IsString()
