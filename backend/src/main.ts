@@ -5,7 +5,7 @@ import cookieParser from 'cookie-parser';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
-  
+
   app.use(cookieParser());
   app.useGlobalPipes(
     new ValidationPipe({
@@ -15,21 +15,25 @@ async function bootstrap() {
   );
 
   app.enableCors({
-    // Use the ENV variable, but ensure it's exact (no trailing slash)
+    // Important: Ensure this URL in Vercel settings has NO trailing slash
     origin: process.env.FRONTEND_URL || 'https://brainec-salam.vercel.app',
     credentials: true,
   });
 
-  // CRITICAL: Vercel does not use app.listen(). 
-  // We only call it if we are NOT on Vercel.
+  // Local development logic
   if (process.env.NODE_ENV !== 'production') {
     const port = process.env.PORT || 5000;
     await app.listen(port);
+    console.log(`Application is running on: http://localhost:${port}`);
   }
 
-  // We return the app instance for Vercel
-  return app.getHttpAdapter().getInstance();
+  await app.init(); // Initialize the app but don't call listen() for Vercel
+  return app;
 }
 
-// Export the bootstrap function for Vercel's serverless handler
-export default bootstrap(); 
+// Handler for Vercel Serverless environment
+export default async (req: any, res: any) => {
+  const app = await bootstrap();
+  const instance = app.getHttpAdapter().getInstance();
+  return instance(req, res);
+};
