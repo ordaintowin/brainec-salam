@@ -1,0 +1,12 @@
+{
+  "experimentalServices": {
+    "frontend": {
+      "framework": "nextjs",
+      "outputDirectory": "public"
+    },
+    "backend": {
+      "framework": "nodejs",
+      "outputDirectory": "dist"
+    }
+  }
+}
