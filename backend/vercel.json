@@ -1,10 +1,12 @@
 {
   "version": 2,
   "builds": [
-    { "src": "src/main.ts", "use": "@vercel/node" }
+    {
+      "src": "src/main.ts",
+      "use": "@vercel/node"
+    }
   ],
   "rewrites": [
-    { "source": "/auth/(.*)", "destination": "src/main.ts" },
-    { "source": "/api/(.*)", "destination": "src/main.ts" }
+    { "source": "/(.*)", "destination": "src/main.ts" }
   ]
 }
