@@ -8,7 +8,7 @@
     },
     "backend": {
       "entrypoint": "backend",
-      "routePrefix": "/_/backend"
+      "routePrefix": "https://brainec-salam-d1gy.vercel.app/"
     }
   }
 }
