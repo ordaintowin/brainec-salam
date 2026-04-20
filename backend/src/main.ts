@@ -16,7 +16,7 @@ async function bootstrap() {
 
   app.enableCors({
     // Important: Ensure this URL in Vercel settings has NO trailing slash
-    origin: process.env.FRONTEND_URL || 'https://brainec-salam.vercel.app',
+    origin: process.env.FRONTEND_URL || 'https://brainecs-salam.vercel.app',
     credentials: true,
   });
 
