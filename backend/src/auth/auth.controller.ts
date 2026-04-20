@@ -18,11 +18,13 @@ export class AuthController {
   ) {
     const result = await this.authService.login(dto.email, dto.password);
 
+    // CHANGED: sameSite set to 'none' and secure set to true for Vercel production
     res.cookie('access_token', result.access_token, {
       httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'lax',
+      secure: true,      // Must be true for sameSite: 'none' to work
+      sameSite: 'none',  // Required for cross-site (frontend domain != backend domain)
       maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
+      path: '/',         // Ensure cookie is available for all routes
     });
 
     return result;
@@ -31,7 +33,13 @@ export class AuthController {
   @Post('logout')
   @HttpCode(HttpStatus.OK)
   logout(@Res({ passthrough: true }) res: Response) {
-    res.clearCookie('access_token');
+    // Ensure logout also uses the same flags to clear correctly
+    res.clearCookie('access_token', {
+      httpOnly: true,
+      secure: true,
+      sameSite: 'none',
+      path: '/',
+    });
     return { message: 'Logged out successfully' };
   }
 
