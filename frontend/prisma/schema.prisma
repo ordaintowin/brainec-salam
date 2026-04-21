@@ -4,7 +4,7 @@ generator client {
 
 datasource db {
   provider = "postgresql"
-  url      = env("DATABASE_URL")
+  // NOTE: The 'url' property has been moved to prisma.config.ts for Prisma 7 compatibility
 }
 
 enum Role {
@@ -38,16 +38,16 @@ enum TermStatus {
 }
 
 model Term {
-  id          String     @id @default(cuid())
+  id          String         @id @default(cuid())
   name        String
-  startDate   DateTime   @db.Date
-  endDate     DateTime   @db.Date
-  status      TermStatus @default(ACTIVE)
+  startDate   DateTime       @db.Date
+  endDate     DateTime       @db.Date
+  status      TermStatus     @default(ACTIVE)
   createdById String
   closedById  String?
   closedAt    DateTime?
-  createdAt   DateTime   @default(now())
-  updatedAt   DateTime   @updatedAt
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
   attendances Attendance[]
   termDays    TermDay[]
 
@@ -67,11 +67,11 @@ model TermDay {
 }
 
 model DailyAttendanceClosure {
-  id        String   @id @default(cuid())
-  classId   String
-  date      DateTime @db.Date
-  closedBy  String
-  closedAt  DateTime @default(now())
+  id       String   @id @default(cuid())
+  classId  String
+  date     DateTime @db.Date
+  closedBy String
+  closedAt DateTime @default(now())
 
   @@unique([classId, date])
   @@map("daily_attendance_closures")
@@ -130,31 +130,31 @@ model Teacher {
 }
 
 model Student {
-  id              String       @id @default(cuid())
-  studentId       String       @unique
-  firstName       String
-  lastName        String
-  dateOfBirth     DateTime
-  gender          String
-  photoUrl        String?
-  classId         String
-  class           Class        @relation(fields: [classId], references: [id])
-  guardianName    String
-  guardianPhone   String
-  guardianEmail   String?
-  guardianAddress String?
+  id                     String       @id @default(cuid())
+  studentId              String       @unique
+  firstName              String
+  lastName               String
+  dateOfBirth            DateTime
+  gender                 String
+  photoUrl               String?
+  classId                String
+  class                  Class        @relation(fields: [classId], references: [id])
+  guardianName           String
+  guardianPhone          String
+  guardianEmail          String?
+  guardianAddress        String?
   secondaryGuardianName  String?
   secondaryGuardianPhone String?
-  enrollmentDate  DateTime     @default(now())
-  isArchived      Boolean      @default(false)
-  archivedAt      DateTime?
-  archivedBy      String?
-  archiveReason   String?
-  createdAt       DateTime     @default(now())
-  updatedAt       DateTime     @updatedAt
-  payments        Payment[]
-  feeInvoices     FeeInvoice[]
-  attendances     Attendance[]
+  enrollmentDate         DateTime     @default(now())
+  isArchived             Boolean      @default(false)
+  archivedAt             DateTime?
+  archivedBy             String?
+  archiveReason          String?
+  createdAt              DateTime     @default(now())
+  updatedAt              DateTime     @updatedAt
+  payments               Payment[]
+  feeInvoices            FeeInvoice[]
+  attendances            Attendance[]
 
   @@map("students")
 }
