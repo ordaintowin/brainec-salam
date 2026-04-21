@@ -1,0 +1,247 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  HEADMISTRESS
+  ADMIN
+  TEACHER
+}
+
+enum PaymentStatus {
+  PENDING
+  PARTIAL
+  PAID
+  OVERDUE
+}
+
+enum FeeOrderType {
+  CLASS
+  INDIVIDUAL
+  ALL
+}
+
+enum AttendanceStatus {
+  PRESENT
+  ABSENT
+  LATE
+}
+
+enum TermStatus {
+  ACTIVE
+  CLOSED
+}
+
+model Term {
+  id          String     @id @default(cuid())
+  name        String
+  startDate   DateTime   @db.Date
+  endDate     DateTime   @db.Date
+  status      TermStatus @default(ACTIVE)
+  createdById String
+  closedById  String?
+  closedAt    DateTime?
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+  attendances Attendance[]
+  termDays    TermDay[]
+
+  @@map("terms")
+}
+
+model TermDay {
+  id        String   @id @default(cuid())
+  termId    String
+  term      Term     @relation(fields: [termId], references: [id], onDelete: Cascade)
+  date      DateTime @db.Date
+  isHoliday Boolean  @default(false)
+  label     String?
+
+  @@unique([termId, date])
+  @@map("term_days")
+}
+
+model DailyAttendanceClosure {
+  id        String   @id @default(cuid())
+  classId   String
+  date      DateTime @db.Date
+  closedBy  String
+  closedAt  DateTime @default(now())
+
+  @@unique([classId, date])
+  @@map("daily_attendance_closures")
+}
+
+model User {
+  id           String        @id @default(cuid())
+  name         String
+  email        String        @unique
+  password     String
+  role         Role
+  photoUrl     String?
+  isActive     Boolean       @default(true)
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+  createdBy    String?
+  teacher      Teacher?
+  activityLogs ActivityLog[]
+
+  @@map("users")
+}
+
+model Class {
+  id          String     @id @default(cuid())
+  name        String     @unique
+  description String?
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+  teachers    Teacher[]
+  students    Student[]
+  feeOrders   FeeOrder[]
+
+  @@map("classes")
+}
+
+model Teacher {
+  id            String    @id @default(cuid())
+  userId        String    @unique
+  user          User      @relation(fields: [userId], references: [id])
+  classId       String?
+  class         Class?    @relation(fields: [classId], references: [id])
+  employeeId    String    @unique
+  phone         String?
+  address       String?
+  qualification String?
+  joinDate      DateTime
+  photoUrl      String?
+  isArchived    Boolean   @default(false)
+  archivedAt    DateTime?
+  archivedBy    String?
+  archiveReason String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  @@map("teachers")
+}
+
+model Student {
+  id              String       @id @default(cuid())
+  studentId       String       @unique
+  firstName       String
+  lastName        String
+  dateOfBirth     DateTime
+  gender          String
+  photoUrl        String?
+  classId         String
+  class           Class        @relation(fields: [classId], references: [id])
+  guardianName    String
+  guardianPhone   String
+  guardianEmail   String?
+  guardianAddress String?
+  secondaryGuardianName  String?
+  secondaryGuardianPhone String?
+  enrollmentDate  DateTime     @default(now())
+  isArchived      Boolean      @default(false)
+  archivedAt      DateTime?
+  archivedBy      String?
+  archiveReason   String?
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+  payments        Payment[]
+  feeInvoices     FeeInvoice[]
+  attendances     Attendance[]
+
+  @@map("students")
+}
+
+model FeeOrder {
+  id          String       @id @default(cuid())
+  title       String
+  description String?
+  amount      Decimal      @db.Decimal(10, 2)
+  dueDate     DateTime
+  type        FeeOrderType @default(ALL)
+  classId     String?
+  class       Class?       @relation(fields: [classId], references: [id])
+  createdById String
+  isArchived  Boolean      @default(false)
+  archivedAt  DateTime?
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+  invoices    FeeInvoice[]
+
+  @@map("fee_orders")
+}
+
+model FeeInvoice {
+  id         String        @id @default(cuid())
+  studentId  String
+  student    Student       @relation(fields: [studentId], references: [id])
+  feeOrderId String
+  feeOrder   FeeOrder      @relation(fields: [feeOrderId], references: [id])
+  amountDue  Decimal       @db.Decimal(10, 2)
+  amountPaid Decimal       @default(0) @db.Decimal(10, 2)
+  balance    Decimal       @db.Decimal(10, 2)
+  status     PaymentStatus @default(PENDING)
+  dueDate    DateTime
+  createdAt  DateTime      @default(now())
+  updatedAt  DateTime      @updatedAt
+  payments   Payment[]
+
+  @@map("fee_invoices")
+}
+
+model Payment {
+  id         String     @id @default(cuid())
+  studentId  String
+  student    Student    @relation(fields: [studentId], references: [id])
+  invoiceId  String
+  invoice    FeeInvoice @relation(fields: [invoiceId], references: [id])
+  amount     Decimal    @db.Decimal(10, 2)
+  method     String
+  reference  String?
+  paidBy     String
+  recordedBy String
+  notes      String?
+  paidAt     DateTime   @default(now())
+  createdAt  DateTime   @default(now())
+
+  @@map("payments")
+}
+
+model Attendance {
+  id        String           @id @default(cuid())
+  studentId String
+  student   Student          @relation(fields: [studentId], references: [id])
+  classId   String
+  date      DateTime         @db.Date
+  status    AttendanceStatus @default(PRESENT)
+  markedBy  String
+  notes     String?
+  termId    String?
+  term      Term?            @relation(fields: [termId], references: [id])
+  createdAt DateTime         @default(now())
+
+  @@unique([studentId, date])
+  @@map("attendance")
+}
+
+model ActivityLog {
+  id          String   @id @default(cuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id])
+  action      String
+  targetType  String
+  targetId    String?
+  description String
+  metadata    Json?
+  ipAddress   String?
+  createdAt   DateTime @default(now())
+
+  @@map("activity_logs")
+}
