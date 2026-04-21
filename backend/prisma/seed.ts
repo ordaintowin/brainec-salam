@@ -1,15 +1,26 @@
 import { PrismaClient } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
+import fs from 'fs';
+import csv from 'csv-parser';
+import path from 'path';
 
 const prisma = new PrismaClient();
 
 async function main() {
   console.log('🌱 Starting seed...');
 
-  // ----- Classes -----
-  const classNames = ['KG1', 'KG2', 'Nursery1', 'Nursery2', 'Primary1'];
+  // 1. Setup Classes (Updated to match your image exactly)
+  const classNames = [
+    'Lilly/Infant',
+    'Pre-Nursery',
+    'Nursery 1',
+    'Nursery 2',
+    'KG 1',
+    'KG 2',
+    'Grade 1'
+  ];
+  
   const classes: Record<string, any> = {};
-
   for (const name of classNames) {
     const cls = await prisma.class.upsert({
       where: { name },
@@ -17,10 +28,10 @@ async function main() {
       create: { name, description: `${name} Class` },
     });
     classes[name] = cls;
-    console.log(`✅ Class: ${name}`);
   }
+  console.log('✅ Classes initialized');
 
-  // ----- Headmistress -----
+  // 2. Setup Headmistress
   const headPassword = await bcrypt.hash('Admin@1234', 10);
   await prisma.user.upsert({
     where: { email: 'headmistress@brainec-salam.edu.gh' },
@@ -32,123 +43,72 @@ async function main() {
       role: 'HEADMISTRESS',
     },
   });
-  console.log('✅ Headmistress user created');
 
-  // ----- Teachers -----
-  const teacherData = [
-    {
-      name: 'Mr. Kwame Asante',
-      email: 'kwame.asante@brainec-salam.edu.gh',
-      employeeId: 'BST-001',
-      classKey: 'KG1',
-      phone: '0244123456',
-      qualification: 'B.Ed. Basic Education',
-      joinDate: new Date('2020-09-01'),
+  // 3. Setup Admin (Using your specific hash)
+  await prisma.user.upsert({
+    where: { email: 'admin@bs.com' },
+    update: {},
+    create: {
+      name: 'Admin',
+      email: 'admin@bs.com',
+      password: '$2a$12$p2vcswaPU.RUYvyNA65xT.wCfLtd8UppVvwDhc.dQzuyTF83MjTP2',
+      role: 'ADMIN',
     },
-    {
-      name: 'Mrs. Abena Mensah',
-      email: 'abena.mensah@brainec-salam.edu.gh',
-      employeeId: 'BST-002',
-      classKey: 'KG2',
-      phone: '0277654321',
-      qualification: 'Diploma in Early Childhood Education',
-      joinDate: new Date('2021-01-15'),
-    },
-  ];
+  });
+  console.log('✅ Admin user restored');
 
-  const teacherPassword = await bcrypt.hash('Teacher@1234', 10);
+  // 4. Selective Clear: Delete ONLY student records
+  await prisma.student.deleteMany({});
+  console.log('🗑️  Cleared old student records');
 
-  for (const t of teacherData) {
-    const user = await prisma.user.upsert({
-      where: { email: t.email },
-      update: {},
-      create: {
-        name: t.name,
-        email: t.email,
-        password: teacherPassword,
-        role: 'TEACHER',
-      },
-    });
-
-    await prisma.teacher.upsert({
-      where: { employeeId: t.employeeId },
-      update: {},
-      create: {
-        userId: user.id,
-        employeeId: t.employeeId,
-        classId: classes[t.classKey].id,
-        phone: t.phone,
-        qualification: t.qualification,
-        joinDate: t.joinDate,
-      },
-    });
-    console.log(`✅ Teacher: ${t.name}`);
-  }
-
-  // ----- Students -----
-  const studentSeed: Array<{
-    firstName: string;
-    lastName: string;
-    gender: string;
-    dateOfBirth: Date;
-    guardianName: string;
-    guardianPhone: string;
-    classKey: string;
-  }> = [
-    // KG1
-    { firstName: 'Kofi', lastName: 'Boateng', gender: 'Male', dateOfBirth: new Date('2019-03-12'), guardianName: 'Emmanuel Boateng', guardianPhone: '0201112233', classKey: 'KG1' },
-    { firstName: 'Ama', lastName: 'Owusu', gender: 'Female', dateOfBirth: new Date('2019-07-04'), guardianName: 'Grace Owusu', guardianPhone: '0202223344', classKey: 'KG1' },
-    { firstName: 'Yaw', lastName: 'Darko', gender: 'Male', dateOfBirth: new Date('2019-11-22'), guardianName: 'Patrick Darko', guardianPhone: '0203334455', classKey: 'KG1' },
-    // KG2
-    { firstName: 'Akua', lastName: 'Asare', gender: 'Female', dateOfBirth: new Date('2018-05-18'), guardianName: 'Beatrice Asare', guardianPhone: '0244556677', classKey: 'KG2' },
-    { firstName: 'Kweku', lastName: 'Adjei', gender: 'Male', dateOfBirth: new Date('2018-09-30'), guardianName: 'Samuel Adjei', guardianPhone: '0245667788', classKey: 'KG2' },
-    { firstName: 'Efua', lastName: 'Tetteh', gender: 'Female', dateOfBirth: new Date('2018-01-14'), guardianName: 'Comfort Tetteh', guardianPhone: '0246778899', classKey: 'KG2' },
-    // Nursery1
-    { firstName: 'Nana', lastName: 'Appiah', gender: 'Male', dateOfBirth: new Date('2020-04-07'), guardianName: 'Richard Appiah', guardianPhone: '0277889900', classKey: 'Nursery1' },
-    { firstName: 'Adwoa', lastName: 'Frimpong', gender: 'Female', dateOfBirth: new Date('2020-08-19'), guardianName: 'Janet Frimpong', guardianPhone: '0278990011', classKey: 'Nursery1' },
-    { firstName: 'Kwabena', lastName: 'Acheampong', gender: 'Male', dateOfBirth: new Date('2020-12-03'), guardianName: 'Isaac Acheampong', guardianPhone: '0279001122', classKey: 'Nursery1' },
-    // Nursery2
-    { firstName: 'Abena', lastName: 'Amoah', gender: 'Female', dateOfBirth: new Date('2019-02-25'), guardianName: 'Felicia Amoah', guardianPhone: '0500112233', classKey: 'Nursery2' },
-    { firstName: 'Kwame', lastName: 'Osei', gender: 'Male', dateOfBirth: new Date('2019-06-10'), guardianName: 'Felix Osei', guardianPhone: '0501223344', classKey: 'Nursery2' },
-    { firstName: 'Akosua', lastName: 'Bonsu', gender: 'Female', dateOfBirth: new Date('2019-10-17'), guardianName: 'Doris Bonsu', guardianPhone: '0502334455', classKey: 'Nursery2' },
-    // Primary1
-    { firstName: 'Fiifi', lastName: 'Quaye', gender: 'Male', dateOfBirth: new Date('2017-03-28'), guardianName: 'Anthony Quaye', guardianPhone: '0541445566', classKey: 'Primary1' },
-    { firstName: 'Maame', lastName: 'Kyei', gender: 'Female', dateOfBirth: new Date('2017-07-09'), guardianName: 'Victoria Kyei', guardianPhone: '0542556677', classKey: 'Primary1' },
-    { firstName: 'Kofi', lastName: 'Kusi', gender: 'Male', dateOfBirth: new Date('2017-11-01'), guardianName: 'George Kusi', guardianPhone: '0543667788', classKey: 'Primary1' },
-  ];
-
+  // 5. Process Students from CSV
+  const students: any[] = [];
   const year = new Date().getFullYear();
   let counter = 1;
 
-  for (const s of studentSeed) {
-    const studentId = `BS-${year}-${String(counter).padStart(3, '0')}`;
-    const existing = await prisma.student.findUnique({ where: { studentId } });
-    if (!existing) {
-      await prisma.student.create({
-        data: {
-          studentId,
-          firstName: s.firstName,
-          lastName: s.lastName,
-          gender: s.gender,
-          dateOfBirth: s.dateOfBirth,
-          classId: classes[s.classKey].id,
-          guardianName: s.guardianName,
-          guardianPhone: s.guardianPhone,
-        },
-      });
-      console.log(`✅ Student: ${s.firstName} ${s.lastName} (${studentId})`);
-    }
-    counter++;
-  }
+  const csvFilePath = path.join(__dirname, 'br.csv');
 
-  console.log('🎉 Seed complete!');
+  await new Promise((resolve, reject) => {
+    if (!fs.existsSync(csvFilePath)) {
+      return reject(new Error(`File not found at ${csvFilePath}. Move br.csv to prisma folder.`));
+    }
+
+    fs.createReadStream(csvFilePath)
+      .pipe(csv())
+      .on('data', (row) => {
+        const classNameFromCSV = row.classId?.trim();
+        const targetClass = classes[classNameFromCSV];
+
+        students.push({
+          studentId: `BAC-${year}-${String(counter++).padStart(3, '0')}`,
+          firstName: row.firstName,
+          lastName: row.lastName,
+          // Matches CSV classId to DB. Defaults to Grade 1 if not found.
+          classId: targetClass ? targetClass.id : classes['Grade 1'].id,
+          guardianPhone: row.guardianPhone,
+          secondaryGuardianPhone: row.secondaryGuardianPhone || null,
+          
+          // Default required fields
+          gender: 'MALE', 
+          dateOfBirth: new Date('2015-01-01'),
+          guardianName: 'Default Guardian', 
+        });
+      })
+      .on('end', resolve)
+      .on('error', reject);
+  });
+
+  console.log(`Parsed ${students.length} students. Uploading...`);
+
+  // 6. Bulk Insert
+  await prisma.student.createMany({
+    data: students,
+    skipDuplicates: true,
+  });
+
+  console.log('🎉 Seed complete! All users and classes are now correct.');
 }
 
 main()
-  .catch((e) => {
-    console.error(e);
-    process.exit(1);
-  })
-  .finally(async () => {
-    await prisma.$disconnect();
-  });
+  .catch((e) => { console.error('❌ Seed Error:', e.message); process.exit(1); })
+  .finally(async () => { await prisma.$disconnect(); });
