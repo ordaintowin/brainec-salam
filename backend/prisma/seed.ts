@@ -1,26 +1,17 @@
-import { PrismaClient } from '@prisma/client';
+// Replace the top lines with this import
+import prisma from '../lib/prisma'; // Adjust path if your lib is elsewhere
 import * as bcrypt from 'bcrypt';
 import fs from 'fs';
 import csv from 'csv-parser';
 import path from 'path';
 
-const prisma = new PrismaClient();
+// REMOVE: const prisma = new PrismaClient();
 
 async function main() {
   console.log('🌱 Starting seed...');
-
-  // 1. Setup Classes (Updated to match your image exactly)
-  const classNames = [
-    'Lilly/Infant',
-    'Pre-Nursery',
-    'Nursery 1',
-    'Nursery 2',
-    'KG 1',
-    'KG 2',
-    'Grade 1'
-  ];
-  
+  const classNames = ['Lilly/Infant', 'Pre-Nursery', 'Nursery 1', 'Nursery 2', 'KG 1', 'KG 2', 'Grade 1'];
   const classes: Record<string, any> = {};
+
   for (const name of classNames) {
     const cls = await prisma.class.upsert({
       where: { name },
@@ -31,7 +22,6 @@ async function main() {
   }
   console.log('✅ Classes initialized');
 
-  // 2. Setup Headmistress
   const headPassword = await bcrypt.hash('Admin@1234', 10);
   await prisma.user.upsert({
     where: { email: 'headmistress@brainec-salam.edu.gh' },
@@ -44,7 +34,6 @@ async function main() {
     },
   });
 
-  // 3. Setup Admin (Using your specific hash)
   await prisma.user.upsert({
     where: { email: 'admin@bs.com' },
     update: {},
@@ -57,56 +46,39 @@ async function main() {
   });
   console.log('✅ Admin user restored');
 
-  // 4. Selective Clear: Delete ONLY student records
   await prisma.student.deleteMany({});
-  console.log('🗑️  Cleared old student records');
+  console.log('🗑️ Cleared old student records');
 
-  // 5. Process Students from CSV
   const students: any[] = [];
   const year = new Date().getFullYear();
   let counter = 1;
-
   const csvFilePath = path.join(__dirname, 'br.csv');
 
   await new Promise((resolve, reject) => {
-    if (!fs.existsSync(csvFilePath)) {
-      return reject(new Error(`File not found at ${csvFilePath}. Move br.csv to prisma folder.`));
-    }
-
+    if (!fs.existsSync(csvFilePath)) return reject(new Error(`File not found at ${csvFilePath}`));
     fs.createReadStream(csvFilePath)
       .pipe(csv())
       .on('data', (row) => {
         const classNameFromCSV = row.classId?.trim();
         const targetClass = classes[classNameFromCSV];
-
         students.push({
           studentId: `BAC-${year}-${String(counter++).padStart(3, '0')}`,
           firstName: row.firstName,
           lastName: row.lastName,
-          // Matches CSV classId to DB. Defaults to Grade 1 if not found.
           classId: targetClass ? targetClass.id : classes['Grade 1'].id,
           guardianPhone: row.guardianPhone,
           secondaryGuardianPhone: row.secondaryGuardianPhone || null,
-          
-          // Default required fields
-          gender: 'MALE', 
+          gender: 'MALE',
           dateOfBirth: new Date('2015-01-01'),
-          guardianName: 'Default Guardian', 
+          guardianName: 'Default Guardian',
         });
       })
       .on('end', resolve)
       .on('error', reject);
   });
 
-  console.log(`Parsed ${students.length} students. Uploading...`);
-
-  // 6. Bulk Insert
-  await prisma.student.createMany({
-    data: students,
-    skipDuplicates: true,
-  });
-
-  console.log('🎉 Seed complete! All users and classes are now correct.');
+  await prisma.student.createMany({ data: students, skipDuplicates: true });
+  console.log('🎉 Seed complete!');
 }
 
 main()

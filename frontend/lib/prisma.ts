@@ -1,15 +1,9 @@
-import { PrismaClient } from '@prisma/client'
+import prisma from '../lib/prisma'; // Use the singleton
+import * as bcrypt from 'bcrypt';
+import fs from 'fs';
+import csv from 'csv-parser';
+import path from 'path';
 
-const prismaClientSingleton = () => {
-  return new PrismaClient()
-}
+// REMOVE: const prisma = new PrismaClient();
 
-declare const globalThis: {
-  prismaGlobal: ReturnType<typeof prismaClientSingleton>;
-} & typeof global;
-
-const prisma = globalThis.prismaGlobal ?? prismaClientSingleton()
-
-export default prisma
-
-if (process.env.NODE_ENV !== 'production') globalThis.prismaGlobal = prisma
+// ... (Rest of the main function is identical to the one above)
