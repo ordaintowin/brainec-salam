@@ -164,7 +164,7 @@ export default function StudentsPage() {
 
   return (
     <div className="p-8">
-      <div className="flex items-center justify-between mb-6">
+      <div className="mobile-page-header flex items-center justify-between mb-6">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Students</h1>
           <p className="text-gray-500 text-sm mt-1">
@@ -174,7 +174,7 @@ export default function StudentsPage() {
           </p>
         </div>
         {canManage && (
-          <div className="flex items-center gap-2">
+          <div className="mobile-action-group flex items-center gap-2">
             <button
               onClick={handleExport}
               className="flex items-center gap-2 border border-gray-300 text-gray-700 hover:bg-gray-50 px-4 py-2 rounded-lg text-sm font-medium transition-colors"

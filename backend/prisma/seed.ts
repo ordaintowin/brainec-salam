@@ -1,11 +1,8 @@
 // Replace the top lines with this import
-import prisma from '../lib/prisma'; // Adjust path if your lib is elsewhere
+import { PrismaClient } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
-import fs from 'fs';
-import csv from 'csv-parser';
-import path from 'path';
 
-// REMOVE: const prisma = new PrismaClient();
+const prisma = new PrismaClient();
 
 async function main() {
   console.log('🌱 Starting seed...');
@@ -34,50 +31,23 @@ async function main() {
     },
   });
 
+  const adminPassword = await bcrypt.hash('admin', 10);
   await prisma.user.upsert({
     where: { email: 'admin@bs.com' },
-    update: {},
+    update: {
+      name: 'Admin',
+      password: adminPassword,
+      role: 'ADMIN',
+      isActive: true,
+    },
     create: {
       name: 'Admin',
       email: 'admin@bs.com',
-      password: '$2a$12$p2vcswaPU.RUYvyNA65xT.wCfLtd8UppVvwDhc.dQzuyTF83MjTP2',
+      password: adminPassword,
       role: 'ADMIN',
     },
   });
   console.log('✅ Admin user restored');
-
-  await prisma.student.deleteMany({});
-  console.log('🗑️ Cleared old student records');
-
-  const students: any[] = [];
-  const year = new Date().getFullYear();
-  let counter = 1;
-  const csvFilePath = path.join(__dirname, 'br.csv');
-
-  await new Promise((resolve, reject) => {
-    if (!fs.existsSync(csvFilePath)) return reject(new Error(`File not found at ${csvFilePath}`));
-    fs.createReadStream(csvFilePath)
-      .pipe(csv())
-      .on('data', (row) => {
-        const classNameFromCSV = row.classId?.trim();
-        const targetClass = classes[classNameFromCSV];
-        students.push({
-          studentId: `BAC-${year}-${String(counter++).padStart(3, '0')}`,
-          firstName: row.firstName,
-          lastName: row.lastName,
-          classId: targetClass ? targetClass.id : classes['Grade 1'].id,
-          guardianPhone: row.guardianPhone,
-          secondaryGuardianPhone: row.secondaryGuardianPhone || null,
-          gender: 'MALE',
-          dateOfBirth: new Date('2015-01-01'),
-          guardianName: 'Default Guardian',
-        });
-      })
-      .on('end', resolve)
-      .on('error', reject);
-  });
-
-  await prisma.student.createMany({ data: students, skipDuplicates: true });
   console.log('🎉 Seed complete!');
 }
 

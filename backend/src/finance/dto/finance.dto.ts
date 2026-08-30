@@ -48,7 +48,28 @@ export class CreateFeeOrderDto {
   @IsArray()
   @IsString({ each: true })
   @IsOptional()
+  classIds?: string[];
+
+  @IsArray()
+  @IsString({ each: true })
+  @IsOptional()
   studentIds?: string[];
+}
+
+export class UpdateFeeOrderDto {
+  @IsString()
+  @IsOptional()
+  title?: string;
+
+  @IsNumber()
+  @IsPositive()
+  @Type(() => Number)
+  @IsOptional()
+  amount?: number;
+
+  @IsDateString()
+  @IsOptional()
+  dueDate?: string;
 }
 
 export class RecordPaymentDto {

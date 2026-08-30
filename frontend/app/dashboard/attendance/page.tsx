@@ -353,7 +353,7 @@ export default function AttendancePage() {
 
       {/* ── Tabs ─────────────────────────────────────────────── */}
       <div className="border-b border-gray-200 mb-6">
-        <div className="flex">
+        <div className="mobile-tabs flex">
           {([
             { key: 'dashboard' as const, label: 'Overview' },
             { key: 'mark'      as const, label: 'Mark Attendance' },
@@ -386,7 +386,7 @@ export default function AttendancePage() {
             <>
               {/* No active term notice */}
               {!dashboard?.activeTerm && (
-                <div className="flex items-center justify-between bg-amber-50 border border-amber-200 rounded-xl p-4">
+                <div className="mobile-card-header flex items-center justify-between bg-amber-50 border border-amber-200 rounded-xl p-4">
                   <div className="flex items-center gap-3">
                     <CalendarDays className="w-5 h-5 text-amber-600 shrink-0" />
                     <div>
@@ -398,7 +398,7 @@ export default function AttendancePage() {
                   </div>
                   <Link
                     href="/dashboard/terms"
-                    className="shrink-0 text-xs font-semibold bg-amber-600 hover:bg-amber-700 text-white px-3 py-1.5 rounded-lg transition-colors"
+                    className="shrink-0 text-center text-xs font-semibold bg-amber-600 hover:bg-amber-700 text-white px-3 py-1.5 rounded-lg transition-colors"
                   >
                     Manage Terms →
                   </Link>
@@ -886,7 +886,7 @@ export default function AttendancePage() {
               </div>
 
               {/* ── Action buttons ─────────────────────────── */}
-              <div className="flex items-center justify-between gap-3">
+              <div className="mobile-card-header flex items-center justify-between gap-3">
                 <div>
                   {/* Close-day button — visible only after 3 PM or for headmistress */}
                   {!isDayClosed && !isTermClosed && selectedClassId &&

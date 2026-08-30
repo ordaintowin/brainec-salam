@@ -27,7 +27,7 @@ export default function DataTable({
   return (
     <div>
       <div className="overflow-x-auto rounded-lg border border-gray-200">
-        <table className="w-full text-sm">
+        <table className="w-full min-w-[640px] text-sm">
           <thead>
             <tr className="bg-gray-50 border-b border-gray-200">
               {columns.map((col, idx) => (
@@ -68,11 +68,11 @@ export default function DataTable({
 
       {/* Pagination */}
       {totalPages > 1 && onPageChange && (
-        <div className="flex items-center justify-between mt-4">
+        <div className="mobile-pagination flex items-center justify-between mt-4">
           <p className="text-sm text-gray-500">
             Page {currentPage} of {totalPages}
           </p>
-          <div className="flex gap-1">
+          <div className="mobile-pagination-controls flex gap-1">
             <button
               onClick={() => onPageChange(currentPage - 1)}
               disabled={currentPage <= 1}

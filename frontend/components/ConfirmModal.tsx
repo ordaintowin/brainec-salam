@@ -51,7 +51,7 @@ export default function ConfirmModal({
           </div>
         )}
 
-        <div className="flex gap-3 justify-end">
+        <div className="mobile-modal-actions flex gap-3 justify-end">
           <button
             onClick={onCancel}
             disabled={isLoading}

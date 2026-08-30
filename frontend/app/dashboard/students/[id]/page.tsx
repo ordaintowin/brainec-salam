@@ -1,7 +1,7 @@
 'use client';
 import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import { ArrowLeft, Pencil, Printer, ChevronLeft, ChevronRight, Calendar, CheckCircle2, XCircle, Clock, TrendingUp, Archive, CreditCard } from 'lucide-react';
+import { ArrowLeft, Pencil, Printer, ChevronLeft, ChevronRight, Calendar, CheckCircle2, XCircle, Clock, TrendingUp, Archive, CreditCard, Plus, Loader2 } from 'lucide-react';
 import api from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import ProfileCard from '@/components/ProfileCard';
@@ -9,6 +9,8 @@ import PaymentStatusBadge from '@/components/PaymentStatusBadge';
 import RecordPaymentModal from '@/components/RecordPaymentModal';
 import BulkPaymentModal from '@/components/BulkPaymentModal';
 import PrintInvoiceModal from '@/components/PrintInvoiceModal';
+import PrintStudentFeeStatement from '@/components/PrintStudentFeeStatement';
+import ConfirmModal from '@/components/ConfirmModal';
 import { formatDate, formatCurrency } from '@/lib/utils';
 
 interface Student {
@@ -38,6 +40,8 @@ interface Invoice {
   status: string;
   dueDate: string;
   studentId: string;
+  isArchivedDebt?: boolean;
+  debtCancelledAt?: string;
   payments?: {
     id: string;
     paidAt: string;
@@ -82,11 +86,11 @@ function PaginationBar({
 }) {
   if (meta.totalPages <= 1) return null;
   return (
-    <div className="flex items-center justify-between mt-4 px-2">
+    <div className="mobile-pagination flex items-center justify-between mt-4 px-2">
       <p className="text-xs text-gray-500">
         Showing {(meta.page - 1) * meta.limit + 1}–{Math.min(meta.page * meta.limit, meta.total)} of {meta.total}
       </p>
-      <div className="flex items-center gap-1">
+      <div className="mobile-pagination-controls flex items-center gap-1">
         <button
           onClick={() => onPageChange(meta.page - 1)}
           disabled={meta.page <= 1}
@@ -179,8 +183,16 @@ export default function StudentDetailPage() {
     open: false, invoiceId: '', studentId: '', balance: 0,
   });
   const [printModal, setPrintModal] = useState<{ open: boolean; invoice: Invoice | null }>({ open: false, invoice: null });
+  const [statementPrintOpen, setStatementPrintOpen] = useState(false);
+  const [showAddFeeModal, setShowAddFeeModal] = useState(false);
+  const [newFee, setNewFee] = useState({ title: '', amount: '', dueDate: new Date().toISOString().slice(0, 10) });
+  const [newFeeError, setNewFeeError] = useState('');
+  const [newFeeSubmitting, setNewFeeSubmitting] = useState(false);
   const [selectedInvoiceIds, setSelectedInvoiceIds] = useState<Set<string>>(new Set());
   const [bulkPaymentOpen, setBulkPaymentOpen] = useState(false);
+  const [debtCancelTarget, setDebtCancelTarget] = useState<Invoice | null>(null);
+  const [debtCancelSubmitting, setDebtCancelSubmitting] = useState(false);
+  const [debtActionError, setDebtActionError] = useState('');
 
   // Attendance History State
   const [termSummaries, setTermSummaries] = useState<TermSummary[]>([]);
@@ -212,6 +224,28 @@ export default function StudentDetailPage() {
   const [termSummaryPage, setTermSummaryPage] = useState(1);
 
   const canManage = user?.role === 'HEADMISTRESS' || user?.role === 'ADMIN';
+
+  const cancelArchivedDebt = async () => {
+    if (!debtCancelTarget) return;
+    setDebtCancelSubmitting(true);
+    setDebtActionError('');
+    try {
+      await api.post(`/finance/invoices/${debtCancelTarget.id}/cancel-debt`);
+      setDebtCancelTarget(null);
+      setSelectedInvoiceIds(prev => {
+        const next = new Set(prev);
+        next.delete(debtCancelTarget.id);
+        return next;
+      });
+      await fetchStudent();
+    } catch (err: unknown) {
+      const responseMessage = (err as { response?: { data?: { message?: string | string[] } } })?.response?.data?.message;
+      setDebtActionError(Array.isArray(responseMessage) ? responseMessage.join(', ') : responseMessage || 'Failed to cancel debt.');
+      setDebtCancelTarget(null);
+    } finally {
+      setDebtCancelSubmitting(false);
+    }
+  };
 
   // Split terms into active vs closed
   const activeTerm = useMemo(() => termSummaries.find(t => t.status === 'ACTIVE') || null, [termSummaries]);
@@ -246,6 +280,44 @@ export default function StudentDetailPage() {
       setLoading(false);
     }
   }, [id]);
+
+  const openAddFeeModal = () => {
+    setNewFee({
+      title: '',
+      amount: '',
+      dueDate: new Date().toISOString().slice(0, 10),
+    });
+    setNewFeeError('');
+    setShowAddFeeModal(true);
+  };
+
+  const createStudentFeeInvoice = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setNewFeeError('');
+
+    if (!newFee.title.trim() || !newFee.amount || Number(newFee.amount) <= 0 || !newFee.dueDate) {
+      setNewFeeError('Enter a fee name, a positive amount, and a due date.');
+      return;
+    }
+
+    setNewFeeSubmitting(true);
+    try {
+      await api.post('/finance/fee-orders', {
+        title: newFee.title.trim(),
+        amount: Number(newFee.amount),
+        dueDate: newFee.dueDate,
+        type: 'INDIVIDUAL',
+        studentIds: [student?.id ?? id],
+      });
+      setShowAddFeeModal(false);
+      await fetchStudent();
+    } catch (err: unknown) {
+      const responseMessage = (err as { response?: { data?: { message?: string | string[] } } })?.response?.data?.message;
+      setNewFeeError(Array.isArray(responseMessage) ? responseMessage.join(', ') : responseMessage || 'Failed to create fee invoice.');
+    } finally {
+      setNewFeeSubmitting(false);
+    }
+  };
 
   const fetchAttendanceHistory = useCallback(async () => {
     setAttendanceLoading(true);
@@ -750,6 +822,16 @@ export default function StudentDetailPage() {
 
     return (
       <div>
+        {debtActionError && (
+          <div className="mb-4 p-3 bg-red-50 border border-red-200 text-red-700 rounded-lg text-sm">
+            {debtActionError}
+          </div>
+        )}
+        {invoices.some(invoice => invoice.isArchivedDebt) && (
+          <div className="mb-4 p-3 bg-amber-50 border border-amber-200 text-amber-800 rounded-lg text-sm">
+            Archived debt is shown here for this student only. It is excluded from the main finance reports.
+          </div>
+        )}
         {/* Bulk payment action bar */}
         {canManage && selectedInvoiceIds.size > 0 && (
           <div className="mb-3 flex items-center justify-between bg-green-50 border border-green-200 rounded-lg px-4 py-3">
@@ -833,7 +915,16 @@ export default function StudentDetailPage() {
                       <td className="px-4 py-3">{formatCurrency(inv.amountDue)}</td>
                       <td className="px-4 py-3 text-green-700">{formatCurrency(inv.amountPaid)}</td>
                       <td className="px-4 py-3 text-red-600">{formatCurrency(inv.balance)}</td>
-                      <td className="px-4 py-3"><PaymentStatusBadge status={inv.status} /></td>
+                      <td className="px-4 py-3">
+                        <div className="flex items-center gap-2">
+                          <PaymentStatusBadge status={inv.status} />
+                          {inv.isArchivedDebt && (
+                            <span className="px-2 py-0.5 rounded text-xs font-medium bg-amber-50 text-amber-700 border border-amber-200">
+                              Archived debt
+                            </span>
+                          )}
+                        </div>
+                      </td>
                       <td className="px-4 py-3">{formatDate(inv.dueDate)}</td>
                       {canManage && (
                         <td className="px-4 py-3">
@@ -846,12 +937,21 @@ export default function StudentDetailPage() {
                                 Record Payment
                               </button>
                             )}
+                            {hasBalance && inv.isArchivedDebt && (
+                              <button
+                                onClick={() => setDebtCancelTarget(inv)}
+                                className="text-xs border border-red-200 text-red-600 hover:bg-red-50 px-2.5 py-1 rounded-md"
+                              >
+                                Cancel debt
+                              </button>
+                            )}
                             <button
                               onClick={() => setPrintModal({ open: true, invoice: inv })}
-                              className="p-1.5 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded"
-                              title="Print invoice"
+                              className="inline-flex items-center gap-1.5 px-2 py-1.5 text-xs text-gray-600 hover:text-gray-800 hover:bg-gray-100 rounded"
+                              title={hasBalance ? 'Print unpaid invoice' : 'Print invoice'}
                             >
                               <Printer className="w-4 h-4" />
+                              <span>Print</span>
                             </button>
                           </div>
                         </td>
@@ -878,20 +978,39 @@ export default function StudentDetailPage() {
 
   return (
     <div className="p-8 max-w-4xl">
-      <div className="flex items-center gap-3 mb-6">
+      <div className="mobile-page-header flex items-center gap-3 mb-6">
         <button onClick={() => router.back()} className="p-2 hover:bg-gray-100 rounded-lg text-gray-500">
           <ArrowLeft className="w-5 h-5" />
         </button>
         <h1 className="text-xl font-bold text-gray-900">Student Profile</h1>
-        {canManage && (
+        <div className="mobile-action-group ml-auto flex items-center gap-2">
           <button
-            onClick={() => router.push(`/dashboard/students/${id}/edit`)}
-            className="ml-auto flex items-center gap-2 bg-[#16a34a] hover:bg-green-700 text-white px-4 py-2 rounded-lg text-sm font-medium"
+            onClick={() => setStatementPrintOpen(true)}
+            className="flex items-center gap-2 border border-gray-300 text-gray-700 hover:bg-gray-50 px-4 py-2 rounded-lg text-sm font-medium"
+            title="Print this student's current fee statement"
           >
-            <Pencil className="w-4 h-4" />
-            Edit
+            <Printer className="w-4 h-4" />
+            Print Fee Statement
           </button>
-        )}
+          {canManage && (
+            <>
+            <button
+              onClick={openAddFeeModal}
+              className="flex items-center gap-2 border border-[#16a34a] text-[#16a34a] hover:bg-green-50 px-4 py-2 rounded-lg text-sm font-medium"
+            >
+              <Plus className="w-4 h-4" />
+              Add Fee Invoice
+            </button>
+            <button
+              onClick={() => router.push(`/dashboard/students/${id}/edit`)}
+              className="flex items-center gap-2 bg-[#16a34a] hover:bg-green-700 text-white px-4 py-2 rounded-lg text-sm font-medium"
+            >
+              <Pencil className="w-4 h-4" />
+              Edit
+            </button>
+            </>
+          )}
+        </div>
       </div>
 
       <ProfileCard
@@ -1024,6 +1143,103 @@ export default function StudentDetailPage() {
             },
           }}
         />
+      )}
+
+      <PrintStudentFeeStatement
+        isOpen={statementPrintOpen}
+        onClose={() => setStatementPrintOpen(false)}
+        student={student}
+        invoices={invoices.filter(invoice => Number(invoice.balance) > 0)}
+      />
+
+      <ConfirmModal
+        isOpen={!!debtCancelTarget}
+        title="Cancel this debt?"
+        message={debtCancelTarget
+          ? `Cancel the outstanding balance of ${formatCurrency(debtCancelTarget.balance)} for ${debtCancelTarget.feeOrder?.title || 'this invoice'}? It will be removed from this student's fee history and all finance reports.`
+          : ''}
+        onConfirm={cancelArchivedDebt}
+        onCancel={() => setDebtCancelTarget(null)}
+        confirmLabel="Cancel debt"
+        confirmClassName="bg-red-600 hover:bg-red-700"
+        isLoading={debtCancelSubmitting}
+      />
+
+      {showAddFeeModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <div className="absolute inset-0 bg-black/50" onClick={() => setShowAddFeeModal(false)} />
+          <div className="relative bg-white rounded-xl shadow-xl p-6 w-full max-w-md mx-4">
+            <div className="flex items-center justify-between mb-5">
+              <div>
+                <h2 className="text-lg font-semibold text-gray-900">Add Fee Invoice</h2>
+                <p className="text-xs text-gray-500 mt-1">
+                  Create a new school fee for {student.firstName} {student.lastName}.
+                </p>
+              </div>
+              <button onClick={() => setShowAddFeeModal(false)} className="text-gray-400 hover:text-gray-600">
+                <XCircle className="w-5 h-5" />
+              </button>
+            </div>
+
+            {newFeeError && (
+              <div className="mb-4 p-3 bg-red-50 border border-red-200 text-red-700 rounded-lg text-sm">
+                {newFeeError}
+              </div>
+            )}
+
+            <form onSubmit={createStudentFeeInvoice} className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Fee Order Name *</label>
+                <input
+                  value={newFee.title}
+                  onChange={event => setNewFee(prev => ({ ...prev, title: event.target.value }))}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#16a34a]"
+                  placeholder="e.g. School Fees - Term 2"
+                  autoFocus
+                />
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Amount (₵) *</label>
+                  <input
+                    type="number"
+                    min="0.01"
+                    step="0.01"
+                    value={newFee.amount}
+                    onChange={event => setNewFee(prev => ({ ...prev, amount: event.target.value }))}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#16a34a]"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Due Date *</label>
+                  <input
+                    type="date"
+                    value={newFee.dueDate}
+                    onChange={event => setNewFee(prev => ({ ...prev, dueDate: event.target.value }))}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#16a34a]"
+                  />
+                </div>
+              </div>
+              <div className="flex justify-end gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowAddFeeModal(false)}
+                  className="px-4 py-2 text-sm text-gray-700 border border-gray-300 rounded-lg hover:bg-gray-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={newFeeSubmitting}
+                  className="px-4 py-2 text-sm text-white bg-[#16a34a] hover:bg-green-700 rounded-lg disabled:opacity-60 flex items-center gap-2"
+                >
+                  {newFeeSubmitting && <Loader2 className="w-4 h-4 animate-spin" />}
+                  Create Invoice
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
       )}
     </div>
   );

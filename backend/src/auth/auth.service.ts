@@ -10,7 +10,12 @@ export class AuthService {
     private jwtService: JwtService,
   ) {}
 
-  async login(email: string, password: string) {
+  async login(identifier: string, password: string) {
+    // The initial admin account is intentionally easy to use in the local
+    // preview: "admin" is an alias for the seeded admin email.
+    const email = identifier.trim().toLowerCase() === 'admin'
+      ? 'admin@bs.com'
+      : identifier.trim().toLowerCase();
     const user = await this.prisma.user.findUnique({ where: { email } });
     if (!user) throw new UnauthorizedException('Invalid credentials');
     if (!user.isActive) throw new UnauthorizedException('Account is inactive');

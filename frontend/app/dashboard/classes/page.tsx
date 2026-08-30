@@ -105,7 +105,7 @@ export default function ClassesPage() {
 
   return (
     <div className="p-8">
-      <div className="flex items-center justify-between mb-6">
+      <div className="mobile-page-header flex items-center justify-between mb-6">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Classes</h1>
           <p className="text-gray-500 text-sm mt-1">Manage school classes</p>
@@ -192,7 +192,7 @@ export default function ClassesPage() {
                 <label className="block text-sm font-medium text-gray-700 mb-1">Description</label>
                 <textarea {...register('description')} rows={2} className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#16a34a] resize-none" />
               </div>
-              <div className="flex gap-3 justify-end">
+              <div className="mobile-modal-actions flex gap-3 justify-end">
                 <button type="button" onClick={() => setShowModal(false)} className="px-4 py-2 text-sm text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50">Cancel</button>
                 <button type="submit" disabled={isSubmitting} className="px-4 py-2 text-sm text-white bg-[#16a34a] hover:bg-green-700 rounded-lg disabled:opacity-60 flex items-center gap-2">
                   {isSubmitting && <Loader2 className="w-4 h-4 animate-spin" />}

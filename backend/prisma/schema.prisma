@@ -103,6 +103,7 @@ model Class {
   teachers    Teacher[]
   students    Student[]
   feeOrders   FeeOrder[]
+  feeOrderClasses FeeOrderClass[]
 
   @@map("classes")
 }
@@ -174,8 +175,19 @@ model FeeOrder {
   createdAt   DateTime     @default(now())
   updatedAt   DateTime     @updatedAt
   invoices    FeeInvoice[]
+  feeOrderClasses FeeOrderClass[]
 
   @@map("fee_orders")
+}
+
+model FeeOrderClass {
+  feeOrderId String
+  classId    String
+  feeOrder   FeeOrder @relation(fields: [feeOrderId], references: [id], onDelete: Cascade)
+  class      Class    @relation(fields: [classId], references: [id], onDelete: Cascade)
+
+  @@id([feeOrderId, classId])
+  @@map("fee_order_classes")
 }
 
 model FeeInvoice {
@@ -189,6 +201,9 @@ model FeeInvoice {
   balance    Decimal       @db.Decimal(10, 2)
   status     PaymentStatus @default(PENDING)
   dueDate    DateTime
+  isArchivedDebt  Boolean   @default(false)
+  debtCancelledAt DateTime?
+  debtCancelledBy String?
   createdAt  DateTime      @default(now())
   updatedAt  DateTime      @updatedAt
   payments   Payment[]

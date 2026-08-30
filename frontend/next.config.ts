@@ -8,6 +8,14 @@ const nextConfig = {
     // This ignores type errors (like the missing bcrypt) during the build
     ignoreBuildErrors: true,
   },
+  async rewrites() {
+    return [
+      {
+        source: '/api/:path*',
+        destination: 'http://127.0.0.1:5001/:path*',
+      },
+    ];
+  },
 }
 
 export default nextConfig

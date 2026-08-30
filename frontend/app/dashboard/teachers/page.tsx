@@ -203,13 +203,13 @@ export default function TeachersPage() {
 
   return (
     <div className="p-8">
-      <div className="flex items-center justify-between mb-6">
+      <div className="mobile-page-header flex items-center justify-between mb-6">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Teachers</h1>
           <p className="text-gray-500 text-sm mt-1">Manage school staff</p>
         </div>
         {canManage && (
-          <div className="flex items-center gap-2">
+          <div className="mobile-action-group flex items-center gap-2">
             <button
               onClick={handleExport}
               className="flex items-center gap-2 border border-gray-300 text-gray-700 hover:bg-gray-50 px-4 py-2 rounded-lg text-sm font-medium transition-colors"
@@ -294,7 +294,7 @@ export default function TeachersPage() {
                 </div>
                 {resetErrors.password && <p className="text-red-500 text-xs mt-1">{resetErrors.password.message}</p>}
               </div>
-              <div className="flex gap-3 justify-end">
+              <div className="mobile-modal-actions flex gap-3 justify-end">
                 <button type="button" onClick={() => setResetModal({ open: false, teacher: null })} className="px-4 py-2 text-sm text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50">Cancel</button>
                 <button type="submit" disabled={resetSubmitting} className="px-4 py-2 text-sm text-white bg-[#16a34a] hover:bg-green-700 rounded-lg disabled:opacity-60 flex items-center gap-2">
                   {resetSubmitting && <Loader2 className="w-4 h-4 animate-spin" />}

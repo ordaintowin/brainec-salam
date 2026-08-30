@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { ArrowLeft, ChevronRight } from 'lucide-react';
 import api from '@/lib/api';
 import { formatCurrency, formatDate } from '@/lib/utils';
+import PrintFinanceSummaryButton from '@/components/PrintFinanceSummaryButton';
 
 interface FeeOrderBreakdown {
   feeOrderId: string;
@@ -23,6 +24,7 @@ interface FinanceSummary {
   totalCollected: number;
   totalOutstanding: number;
   totalOverdue: number;
+  perClassBreakdown: { classId: string; className: string; collected: number; outstanding: number }[];
   feeOrderBreakdown?: FeeOrderBreakdown[];
 }
 
@@ -122,8 +124,20 @@ export default function SummaryFilterPage() {
 
       {/* Header */}
       <div className="mb-6">
-        <h1 className="text-2xl font-bold text-gray-900">{config.label}</h1>
-        <p className="text-gray-500 text-sm mt-1">{config.description}</p>
+        <div className="mobile-card-header flex items-start justify-between gap-4">
+          <div>
+            <h1 className="text-2xl font-bold text-gray-900">{config.label}</h1>
+            <p className="text-gray-500 text-sm mt-1">{config.description}</p>
+          </div>
+          {summary && (
+            <PrintFinanceSummaryButton
+              summary={summary}
+              feeOrders={filteredOrders}
+              reportTitle={config.label}
+              includeClassBreakdown={false}
+            />
+          )}
+        </div>
       </div>
 
       {/* Fee Order Cards */}
@@ -134,11 +148,14 @@ export default function SummaryFilterPage() {
       ) : (
         <div className="space-y-4">
           {filteredOrders.map(fo => (
-            <Link
+            <div
               key={fo.feeOrderId}
-              href={`/dashboard/finance/orders/${fo.feeOrderId}?filter=${drillDownFilter}`}
-              className="block bg-white rounded-xl border border-gray-200 p-5 hover:shadow-md transition-shadow group"
+              className="flex items-stretch gap-3 bg-white rounded-xl border border-gray-200 p-5 hover:shadow-md transition-shadow group"
             >
+              <Link
+                href={`/dashboard/finance/orders/${fo.feeOrderId}?filter=${drillDownFilter}`}
+                className="flex-1"
+              >
               <div className="flex items-center justify-between">
                 <div className="flex-1">
                   <div className="flex items-center gap-3 mb-2">
@@ -170,7 +187,20 @@ export default function SummaryFilterPage() {
                 </div>
                 <ChevronRight className="w-5 h-5 text-gray-300 group-hover:text-gray-500 transition-colors shrink-0 ml-4" />
               </div>
-            </Link>
+              </Link>
+              <PrintFinanceSummaryButton
+                summary={{
+                  totalCollected: fo.totalCollected,
+                  totalOutstanding: fo.totalOutstanding,
+                  totalOverdue: filter === 'overdue' ? fo.totalOutstanding : 0,
+                  perClassBreakdown: [],
+                }}
+                feeOrders={[fo]}
+                reportTitle={`${fo.title} Summary`}
+                includeClassBreakdown={false}
+                buttonLabel="Print"
+              />
+            </div>
           ))}
         </div>
       )}

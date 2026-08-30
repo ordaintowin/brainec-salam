@@ -462,7 +462,7 @@ export default function TermsPage() {
 
   return (
     <div className="p-8">
-      <div className="flex items-center justify-between mb-6">
+      <div className="mobile-page-header flex items-center justify-between mb-6">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Terms</h1>
           <p className="text-gray-500 text-sm mt-1">Manage school terms, calendar, and attendance reports</p>
@@ -495,7 +495,7 @@ export default function TermsPage() {
         <div className="space-y-3">
           {terms.map((term) => (
             <div key={term.id} className={`bg-white rounded-xl border p-5 ${term.status === 'ACTIVE' ? 'border-green-200' : 'border-gray-200'}`}>  
-              <div className="flex items-center justify-between">
+              <div className="mobile-card-header flex items-center justify-between">
                 <div>
                   <div className="flex items-center gap-3">
                     <h3 className="font-semibold text-gray-900">{term.name}</h3>
@@ -515,7 +515,7 @@ export default function TermsPage() {
                     {term.closedAt && <span className="ml-2 text-xs text-gray-400">· Closed {formatDate(term.closedAt)}</span>}
                   </p>
                 </div>
-                <div className="flex items-center gap-2">
+                <div className="mobile-card-actions flex items-center gap-2">
                   <button
                     onClick={() => viewCalendar(term.id)}
                     className="flex items-center gap-1.5 px-3 py-1.5 text-sm border border-gray-300 text-gray-700 hover:bg-gray-50 rounded-lg"
@@ -642,7 +642,7 @@ export default function TermsPage() {
 
           {selectedCalendarDay && (
             <div className="mt-6 bg-white rounded-xl border border-gray-200 shadow-sm p-4">
-              <div className="flex items-center justify-between gap-3">
+              <div className="mobile-card-header flex items-center justify-between gap-3">
                 <h3 className="text-base font-semibold text-gray-900">
                   Attendance for {new Date(`${selectedCalendarDay}T00:00:00Z`).toLocaleDateString('en-GH', {
                     weekday: 'long',
@@ -902,7 +902,7 @@ export default function TermsPage() {
                 School days (weekdays only) will be auto-generated. You can mark holidays afterwards.
               </p>
 
-              <div className="flex gap-3 justify-end">
+              <div className="mobile-modal-actions flex gap-3 justify-end">
                 <button
                   type="button"
                   onClick={() => setShowModal(false)}
@@ -975,7 +975,7 @@ export default function TermsPage() {
                 </div>
               </div>
 
-              <div className="flex gap-3 justify-end">
+              <div className="mobile-modal-actions flex gap-3 justify-end">
                 <button
                   type="button"
                   onClick={() => {

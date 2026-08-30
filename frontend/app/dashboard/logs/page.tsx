@@ -61,7 +61,7 @@ export default function LogsPage() {
 
   return (
     <div className="p-8">
-      <div className="flex items-center justify-between mb-6">
+      <div className="mobile-page-header flex items-center justify-between mb-6">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Activity Logs</h1>
           <p className="text-gray-500 text-sm mt-1">Read-only audit trail of all system activity</p>
@@ -163,9 +163,9 @@ export default function LogsPage() {
 
           {/* Pagination */}
           {totalPages > 1 && (
-            <div className="flex items-center justify-between mt-4">
+            <div className="mobile-pagination flex items-center justify-between mt-4">
               <p className="text-sm text-gray-500">Page {page} of {totalPages}</p>
-              <div className="flex gap-1">
+              <div className="mobile-pagination-controls flex gap-1">
                 <button
                   onClick={() => setPage(p => p - 1)}
                   disabled={page <= 1}

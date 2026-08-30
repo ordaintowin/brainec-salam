@@ -14,9 +14,9 @@ A modern, full-stack school management system built for Brainec Salam school.
 - Live search + pagination on all lists
 
 ## Default Login
-| Role | Email | Password |
-|------|-------|----------|
-| Headmistress | headmistress@brainec-salam.edu.gh | Admin@1234 |
+| Role | Username | Password |
+|------|----------|----------|
+| Admin | admin | admin |
 
 ## Tech Stack
 | Layer | Technology |

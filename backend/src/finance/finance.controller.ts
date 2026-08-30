@@ -2,6 +2,8 @@ import {
   Controller,
   Get,
   Post,
+  Patch,
+  Delete,
   Body,
   Param,
   Query,
@@ -9,7 +11,7 @@ import {
   DefaultValuePipe,
 } from '@nestjs/common';
 import { FinanceService } from './finance.service';
-import { CreateFeeOrderDto, RecordPaymentDto, BulkPaymentDto } from './dto/finance.dto';
+import { CreateFeeOrderDto, UpdateFeeOrderDto, RecordPaymentDto, BulkPaymentDto } from './dto/finance.dto';
 import { Roles } from '../common/decorators/roles.decorator';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { Role } from '@prisma/client';
@@ -22,6 +24,18 @@ export class FinanceController {
   @Roles(Role.HEADMISTRESS, Role.ADMIN)
   createFeeOrder(@Body() dto: CreateFeeOrderDto, @CurrentUser() user: any) {
     return this.financeService.createFeeOrder(dto, user.id);
+  }
+
+  @Patch('fee-orders/:id')
+  @Roles(Role.HEADMISTRESS, Role.ADMIN)
+  updateFeeOrder(@Param('id') id: string, @Body() dto: UpdateFeeOrderDto) {
+    return this.financeService.updateFeeOrder(id, dto);
+  }
+
+  @Delete('fee-orders/:id')
+  @Roles(Role.HEADMISTRESS, Role.ADMIN)
+  deleteFeeOrder(@Param('id') id: string) {
+    return this.financeService.deleteFeeOrder(id);
   }
 
   @Get('fee-orders')
@@ -60,6 +74,12 @@ export class FinanceController {
   @Roles(Role.HEADMISTRESS, Role.ADMIN)
   recordPayment(@Body() dto: RecordPaymentDto, @CurrentUser() user: any) {
     return this.financeService.recordPayment(dto, user.id);
+  }
+
+  @Post('invoices/:id/cancel-debt')
+  @Roles(Role.HEADMISTRESS, Role.ADMIN)
+  cancelDebt(@Param('id') id: string, @CurrentUser() user: any) {
+    return this.financeService.cancelDebt(id, user.id);
   }
 
   @Post('bulk-payments')

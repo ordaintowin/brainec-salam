@@ -11,6 +11,9 @@ interface Payment {
   reference?: string;
   paidBy: string;
   notes?: string;
+  previousPayments?: Payment[];
+  amountPaidBefore?: number;
+  balanceAtPayment?: number;
 }
 
 interface FeeOrder {
@@ -89,6 +92,16 @@ export default function PrintInvoiceModal({ isOpen, onClose, invoice, payment }:
             .status-pending { color: #6b7280; font-weight: 700; }
             .status-overdue { color: #dc2626; font-weight: 700; }
             .footer { margin-top: 40px; border-top: 1px solid #e5e7eb; padding-top: 12px; display: flex; justify-content: space-between; font-size: 11px; color: #888; }
+             @media (max-width: 640px) {
+               body { padding: 16px; }
+               .header { display: block; }
+               .doc-title, .doc-id { text-align: left; margin-top: 8px; }
+               .grid2 { grid-template-columns: 1fr; }
+               .amount-row { align-items: flex-start; gap: 16px; }
+               .amount-value { text-align: right; overflow-wrap: anywhere; }
+               .footer { display: block; }
+               .footer span { display: block; margin-bottom: 4px; }
+             }
             @media print { body { padding: 16px; } }
           </style>
         </head>
@@ -111,17 +124,30 @@ export default function PrintInvoiceModal({ isOpen, onClose, invoice, payment }:
   };
 
   const student = invoice.student;
+  const previousPayments = payment?.previousPayments ?? [];
+  const amountPaidBefore = payment
+    ? Number(
+        payment.amountPaidBefore
+          ?? previousPayments.reduce((sum, previousPayment) => sum + Number(previousPayment.amount), 0),
+      )
+    : 0;
+  const balanceAtPayment = payment
+    ? Number(
+        payment.balanceAtPayment
+          ?? Math.max(0, Number(invoice.amountDue) - amountPaidBefore - Number(payment.amount)),
+      )
+    : Number(invoice.balance);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center">
       <div className="absolute inset-0 bg-black/50" onClick={onClose} />
       <div className="relative bg-white rounded-xl shadow-xl w-full max-w-2xl mx-4 max-h-[90vh] flex flex-col">
         {/* Modal toolbar */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200 flex-shrink-0">
+        <div className="mobile-modal-toolbar flex items-center justify-between px-6 py-4 border-b border-gray-200 flex-shrink-0">
           <h2 className="text-lg font-semibold text-gray-900">
             {payment ? 'Payment Receipt' : 'Fee Invoice'}
           </h2>
-          <div className="flex items-center gap-2">
+          <div className="mobile-modal-toolbar-actions flex items-center gap-2">
             <button
               onClick={handlePrint}
               className="flex items-center gap-2 bg-[#16a34a] hover:bg-green-700 text-white px-4 py-2 rounded-lg text-sm font-medium"
@@ -183,13 +209,14 @@ export default function PrintInvoiceModal({ isOpen, onClose, invoice, payment }:
                 <div>
                   <div className="amount-row"><span className="amount-label">Payment Date</span><span className="amount-value">{formatDate(payment.paidAt)}</span></div>
                   <div className="amount-row"><span className="amount-label">Amount Paid</span><span className="amount-value">{formatCurrency(payment.amount)}</span></div>
+                   <div className="amount-row"><span className="amount-label">Previous Payments</span><span className="amount-value">{formatCurrency(amountPaidBefore)}</span></div>
                   <div className="amount-row"><span className="amount-label">Method</span><span className="amount-value">{payment.method.replace('_', ' ')}</span></div>
                   {payment.reference && <div className="amount-row"><span className="amount-label">Reference</span><span className="amount-value">{payment.reference}</span></div>}
                   <div className="amount-row"><span className="amount-label">Paid By</span><span className="amount-value">{payment.paidBy}</span></div>
                   {payment.notes && <div className="amount-row"><span className="amount-label">Notes</span><span className="amount-value">{payment.notes}</span></div>}
                   <div className="amount-row total-row">
-                    <span className="amount-label">Remaining Balance</span>
-                    <span className="amount-value">{formatCurrency(invoice.balance)}</span>
+                     <span className="amount-label">Balance After This Payment</span>
+                     <span className="amount-value">{formatCurrency(balanceAtPayment)}</span>
                   </div>
                   {invoice.creditBalance != null && invoice.creditBalance > 0 && (
                     <div className="amount-row">
@@ -223,6 +250,38 @@ export default function PrintInvoiceModal({ isOpen, onClose, invoice, payment }:
                 </div>
               )}
             </div>
+
+             {payment && (
+               <div className="section">
+                 <div className="section-title">Previous Payments</div>
+                 {previousPayments.length > 0 ? (
+                   <table>
+                     <thead>
+                       <tr>
+                         <th>Date</th>
+                         <th>Amount</th>
+                         <th>Method</th>
+                         <th>Paid By</th>
+                         <th>Reference</th>
+                       </tr>
+                     </thead>
+                     <tbody>
+                       {previousPayments.map(previousPayment => (
+                         <tr key={previousPayment.id}>
+                           <td>{formatDate(previousPayment.paidAt)}</td>
+                           <td>{formatCurrency(previousPayment.amount)}</td>
+                           <td>{previousPayment.method.replace('_', ' ')}</td>
+                           <td>{previousPayment.paidBy}</td>
+                           <td>{previousPayment.reference || '—'}</td>
+                         </tr>
+                       ))}
+                     </tbody>
+                   </table>
+                 ) : (
+                   <div className="field"><span>No previous payments for this invoice.</span></div>
+                 )}
+               </div>
+             )}
 
             {/* Payment History (invoice view only) */}
             {!payment && invoice.payments && invoice.payments.length > 0 && (

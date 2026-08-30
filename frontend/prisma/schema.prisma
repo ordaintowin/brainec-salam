@@ -189,6 +189,9 @@ model FeeInvoice {
   balance    Decimal       @db.Decimal(10, 2)
   status     PaymentStatus @default(PENDING)
   dueDate    DateTime
+  isArchivedDebt  Boolean   @default(false)
+  debtCancelledAt DateTime?
+  debtCancelledBy String?
   createdAt  DateTime      @default(now())
   updatedAt  DateTime      @updatedAt
   payments   Payment[]

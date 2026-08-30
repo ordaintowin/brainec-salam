@@ -56,7 +56,7 @@ export default function TeacherDetailPage() {
 
   return (
     <div className="p-8 max-w-3xl">
-      <div className="flex items-center gap-3 mb-6">
+      <div className="mobile-page-header flex items-center gap-3 mb-6">
         <button onClick={() => router.back()} className="p-2 hover:bg-gray-100 rounded-lg text-gray-500">
           <ArrowLeft className="w-5 h-5" />
         </button>

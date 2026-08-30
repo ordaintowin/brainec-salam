@@ -22,3 +22,110 @@ body {
   background-color: hsl(var(--background));
   color: hsl(var(--foreground));
 }
+
+button,
+a {
+  min-width: 0;
+}
+
+@media (max-width: 639px) {
+  html,
+  body {
+    overflow-x: hidden;
+  }
+
+  .p-8 {
+    padding: 1rem !important;
+  }
+
+  .p-6 {
+    padding: 1rem !important;
+  }
+
+  .mobile-page-header {
+    align-items: stretch !important;
+    flex-direction: column !important;
+    gap: 0.75rem;
+  }
+
+  .mobile-action-group {
+    align-items: stretch !important;
+    flex-direction: column !important;
+    width: 100%;
+  }
+
+  .mobile-action-group > button,
+  .mobile-action-group > a {
+    justify-content: center;
+    width: 100%;
+  }
+
+  .mobile-tabs {
+    overflow-x: auto;
+    scrollbar-width: thin;
+  }
+
+  .mobile-tabs > * {
+    flex-shrink: 0;
+    white-space: nowrap;
+  }
+
+  .mobile-pagination {
+    align-items: stretch !important;
+    flex-direction: column !important;
+    gap: 0.75rem;
+  }
+
+  .mobile-pagination-controls {
+    flex-wrap: wrap;
+  }
+
+  .mobile-modal-actions {
+    align-items: stretch !important;
+    flex-direction: column-reverse !important;
+  }
+
+  .mobile-modal-actions > button,
+  .mobile-modal-actions > a {
+    justify-content: center;
+    width: 100%;
+  }
+
+  .mobile-modal-toolbar {
+    align-items: stretch !important;
+    flex-direction: column !important;
+    gap: 0.75rem;
+  }
+
+  .mobile-modal-toolbar-actions {
+    justify-content: space-between;
+    width: 100%;
+  }
+
+  .mobile-modal-toolbar-actions > button:first-child {
+    flex: 1 1 auto;
+    justify-content: center;
+  }
+
+  .mobile-card-header {
+    align-items: stretch !important;
+    flex-direction: column !important;
+    gap: 1rem;
+  }
+
+  .mobile-card-actions {
+    align-items: stretch !important;
+    flex-wrap: wrap;
+    width: 100%;
+  }
+
+  .mobile-card-actions > button,
+  .mobile-card-actions > a {
+    flex: 1 1 auto;
+    justify-content: center;
+  }
+
+  .overflow-x-auto > table {
+    min-width: 640px;
+  }
+}

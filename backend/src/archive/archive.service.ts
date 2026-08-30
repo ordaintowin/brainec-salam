@@ -53,6 +53,10 @@ export class ArchiveService {
     if (!student || !student.isArchived) {
       throw new NotFoundException('Archived student not found');
     }
+    await this.prisma.feeInvoice.updateMany({
+      where: { studentId: id, balance: { gt: 0 }, debtCancelledAt: null },
+      data: { isArchivedDebt: true },
+    });
     return this.prisma.student.update({
       where: { id },
       data: {
@@ -62,6 +66,34 @@ export class ArchiveService {
         archiveReason: null,
       },
     });
+  }
+
+  async deleteStudent(id: string) {
+    const student = await this.prisma.student.findUnique({
+      where: { id },
+      select: { id: true, isArchived: true },
+    });
+    if (!student || !student.isArchived) {
+      throw new NotFoundException('Archived student not found');
+    }
+
+    await this.prisma.$transaction(async (tx) => {
+      const invoices = await tx.feeInvoice.findMany({
+        where: { studentId: id },
+        select: { id: true },
+      });
+      const invoiceIds = invoices.map((invoice) => invoice.id);
+
+      await tx.payment.deleteMany({ where: { studentId: id } });
+      if (invoiceIds.length > 0) {
+        await tx.payment.deleteMany({ where: { invoiceId: { in: invoiceIds } } });
+      }
+      await tx.feeInvoice.deleteMany({ where: { studentId: id } });
+      await tx.attendance.deleteMany({ where: { studentId: id } });
+      await tx.student.delete({ where: { id } });
+    });
+
+    return { id, deleted: true };
   }
 
   async restoreTeacher(id: string) {
@@ -78,5 +110,23 @@ export class ArchiveService {
         archiveReason: null,
       },
     });
+  }
+
+  async deleteTeacher(id: string) {
+    const teacher = await this.prisma.teacher.findUnique({
+      where: { id },
+      select: { id: true, userId: true, isArchived: true },
+    });
+    if (!teacher || !teacher.isArchived) {
+      throw new NotFoundException('Archived teacher not found');
+    }
+
+    await this.prisma.$transaction(async (tx) => {
+      await tx.activityLog.deleteMany({ where: { userId: teacher.userId } });
+      await tx.teacher.delete({ where: { id } });
+      await tx.user.delete({ where: { id: teacher.userId } });
+    });
+
+    return { id, deleted: true };
   }
 }

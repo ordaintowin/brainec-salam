@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
-import { CreateFeeOrderDto, RecordPaymentDto, BulkPaymentDto, FeeOrderType } from './dto/finance.dto';
+import { CreateFeeOrderDto, UpdateFeeOrderDto, RecordPaymentDto, BulkPaymentDto, FeeOrderType } from './dto/finance.dto';
 import { PaymentStatus } from '@prisma/client';
 
 /** Tolerance used when comparing floating-point amounts to avoid false overpayment errors */
@@ -11,16 +11,34 @@ export class FinanceService {
   constructor(private prisma: PrismaService) {}
 
   async createFeeOrder(dto: CreateFeeOrderDto, createdById: string) {
+    const selectedClassIds = Array.from(new Set(
+      dto.classIds?.filter(Boolean) ?? (dto.classId ? [dto.classId] : []),
+    ));
+
     // Derive the fee order type from provided data when not explicitly supplied
     let orderType: FeeOrderType;
     if (dto.type) {
       orderType = dto.type;
     } else if (dto.studentIds && dto.studentIds.length > 0) {
       orderType = FeeOrderType.INDIVIDUAL;
-    } else if (dto.classId) {
+    } else if (selectedClassIds.length > 0) {
       orderType = FeeOrderType.CLASS;
     } else {
       orderType = FeeOrderType.ALL;
+    }
+
+    if (orderType === FeeOrderType.CLASS && selectedClassIds.length === 0) {
+      throw new BadRequestException('Select at least one class');
+    }
+
+    if (orderType === FeeOrderType.CLASS) {
+      const matchingClasses = await this.prisma.class.findMany({
+        where: { id: { in: selectedClassIds } },
+        select: { id: true },
+      });
+      if (matchingClasses.length !== selectedClassIds.length) {
+        throw new BadRequestException('One or more selected classes were not found');
+      }
     }
 
     const feeOrder = await this.prisma.feeOrder.create({
@@ -30,10 +48,18 @@ export class FinanceService {
         amount: dto.amount,
         dueDate: new Date(dto.dueDate),
         type: orderType as any,
-        classId: dto.classId || null,
+        // Keep the legacy column populated for single-class orders so older
+        // records and integrations continue to work.
+        classId: selectedClassIds.length === 1 ? selectedClassIds[0] : null,
         createdById,
+        feeOrderClasses: orderType === FeeOrderType.CLASS
+          ? { create: selectedClassIds.map((classId) => ({ classId })) }
+          : undefined,
       },
-      include: { class: true },
+      include: {
+        class: true,
+        feeOrderClasses: { include: { class: true } },
+      },
     });
 
     let students: { id: string }[];
@@ -50,7 +76,9 @@ export class FinanceService {
     } else {
       // Find all active students in class (or all classes)
       const studentWhere: any = { isArchived: false };
-      if (dto.classId) studentWhere.classId = dto.classId;
+      if (selectedClassIds.length > 0) {
+        studentWhere.classId = { in: selectedClassIds };
+      }
 
       students = await this.prisma.student.findMany({
         where: studentWhere,
@@ -90,7 +118,7 @@ export class FinanceService {
       ];
     }
 
-    const [data, total] = await Promise.all([
+    const [rawData, total] = await Promise.all([
       this.prisma.feeOrder.findMany({
         where,
         skip,
@@ -98,11 +126,36 @@ export class FinanceService {
         orderBy: { createdAt: 'desc' },
         include: {
           class: { select: { id: true, name: true } },
+          feeOrderClasses: {
+            include: { class: { select: { id: true, name: true } } },
+          },
+          invoices: {
+            where: {
+              student: { isArchived: false },
+              isArchivedDebt: false,
+              debtCancelledAt: null,
+            },
+            select: {
+              amountPaid: true,
+              balance: true,
+              payments: { select: { id: true } },
+            },
+          },
           _count: { select: { invoices: true } },
         },
       }),
       this.prisma.feeOrder.count({ where }),
     ]);
+
+    const data = rawData.map(({ invoices, feeOrderClasses, ...feeOrder }) => ({
+      ...feeOrder,
+      classes: feeOrderClasses.map((entry) => entry.class),
+      // The fee-order list shows invoices that are still outstanding.
+      // Paid invoices remain available through the payment report/history.
+      _count: { invoices: invoices.filter((invoice) => Number(invoice.balance) > FLOAT_EPSILON).length },
+      totalPaid: invoices.reduce((sum, invoice) => sum + Number(invoice.amountPaid), 0),
+      canDelete: invoices.every((invoice) => Number(invoice.amountPaid) <= FLOAT_EPSILON && invoice.payments.length === 0),
+    }));
 
     return {
       data,
@@ -110,9 +163,116 @@ export class FinanceService {
     };
   }
 
+  async updateFeeOrder(feeOrderId: string, dto: UpdateFeeOrderDto) {
+    const feeOrder = await this.prisma.feeOrder.findUnique({
+      where: { id: feeOrderId },
+      include: {
+        invoices: {
+          select: {
+            studentId: true,
+            amountPaid: true,
+          },
+        },
+      },
+    });
+
+    if (!feeOrder) throw new NotFoundException('Fee order not found');
+    if (feeOrder.isArchived) {
+      throw new BadRequestException('Fully paid fee orders are archived and cannot be edited');
+    }
+
+    const amount = dto.amount ?? Number(feeOrder.amount);
+    const dueDate = dto.dueDate ? new Date(dto.dueDate) : feeOrder.dueDate;
+
+    for (const invoice of feeOrder.invoices) {
+      if (amount + FLOAT_EPSILON < Number(invoice.amountPaid)) {
+        throw new BadRequestException('The order amount cannot be less than an amount already paid');
+      }
+    }
+
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const updatedOrder = await tx.feeOrder.update({
+        where: { id: feeOrderId },
+        data: {
+          ...(dto.title !== undefined ? { title: dto.title } : {}),
+          amount,
+          dueDate,
+        },
+        include: {
+          class: { select: { id: true, name: true } },
+          feeOrderClasses: {
+            include: { class: { select: { id: true, name: true } } },
+          },
+        },
+      });
+
+      for (const invoice of feeOrder.invoices) {
+        const amountPaid = Number(invoice.amountPaid);
+        const balance = Math.max(0, amount - amountPaid);
+        await tx.feeInvoice.updateMany({
+          where: { feeOrderId, studentId: invoice.studentId },
+          data: {
+            amountDue: amount,
+            balance,
+            dueDate,
+            status: balance <= FLOAT_EPSILON
+              ? PaymentStatus.PAID
+              : amountPaid > FLOAT_EPSILON
+                ? PaymentStatus.PARTIAL
+                : PaymentStatus.PENDING,
+          },
+        });
+      }
+
+      return updatedOrder;
+    });
+
+    await this.checkAndArchiveFeeOrderById(feeOrderId);
+    return updated;
+  }
+
+  async deleteFeeOrder(feeOrderId: string) {
+    const feeOrder = await this.prisma.feeOrder.findUnique({
+      where: { id: feeOrderId },
+      include: {
+        invoices: {
+          select: {
+            amountPaid: true,
+            payments: { select: { id: true } },
+          },
+        },
+      },
+    });
+
+    if (!feeOrder) throw new NotFoundException('Fee order not found');
+    if (feeOrder.isArchived) {
+      throw new BadRequestException('Fully paid fee orders are archived and cannot be deleted');
+    }
+
+    const hasPayment = feeOrder.invoices.some(
+      (invoice) => Number(invoice.amountPaid) > FLOAT_EPSILON || invoice.payments.length > 0,
+    );
+    if (hasPayment) {
+      throw new BadRequestException('Fee orders with payments cannot be deleted');
+    }
+
+    await this.prisma.$transaction(async (tx) => {
+      await tx.feeInvoice.deleteMany({ where: { feeOrderId } });
+      await tx.feeOrder.delete({ where: { id: feeOrderId } });
+    });
+
+    return { id: feeOrderId, deleted: true };
+  }
+
   async getInvoices(page = 1, limit = 10, q?: string) {
     const skip = (page - 1) * limit;
-    const where: any = {};
+    const where: any = {
+      student: { isArchived: false },
+      feeOrder: { isArchived: false },
+      balance: { gt: 0 },
+      isArchivedDebt: false,
+      debtCancelledAt: null,
+    };
 
     if (q) {
       where.OR = [
@@ -159,7 +319,11 @@ export class FinanceService {
     if (!student) throw new NotFoundException('Student not found');
 
     const invoices = await this.prisma.feeInvoice.findMany({
-      where: { studentId },
+      where: {
+        studentId,
+        balance: { gt: 0 },
+        debtCancelledAt: null,
+      },
       orderBy: { createdAt: 'desc' },
       include: {
         feeOrder: true,
@@ -244,11 +408,64 @@ export class FinanceService {
     if (!invoice) return;
 
     const allInvoices = await this.prisma.feeInvoice.findMany({
-      where: { feeOrderId: invoice.feeOrderId },
+      where: {
+        feeOrderId: invoice.feeOrderId,
+        student: { isArchived: false },
+        isArchivedDebt: false,
+        debtCancelledAt: null,
+      },
       select: { status: true, balance: true, amountPaid: true },
     });
 
-    if (allInvoices.length === 0) return;
+    // Archived students' invoices are no longer linked to the order. If no
+    // active invoices remain, the order is complete from the school's view.
+    if (allInvoices.length === 0) {
+      const historicalInvoice = await this.prisma.feeInvoice.findFirst({
+        where: { feeOrderId: invoice.feeOrderId },
+        select: { id: true },
+      });
+      if (historicalInvoice) {
+        await this.prisma.feeOrder.update({
+          where: { id: invoice.feeOrderId },
+          data: { isArchived: true, archivedAt: new Date() } as any,
+        });
+      }
+      return;
+    }
+
+    const allPaid = allInvoices.every((inv) =>
+      this.isEffectivelyPaid(inv.status, Number(inv.balance), Number(inv.amountPaid)),
+    );
+
+    if (allPaid) await this.checkAndArchiveFeeOrderById(invoice.feeOrderId);
+  }
+
+  private async checkAndArchiveFeeOrderById(feeOrderId: string): Promise<void> {
+    const allInvoices = await this.prisma.feeInvoice.findMany({
+      where: {
+        feeOrderId,
+        student: { isArchived: false },
+        isArchivedDebt: false,
+        debtCancelledAt: null,
+      },
+      select: { status: true, balance: true, amountPaid: true },
+    });
+
+    // A removed student's invoice is intentionally no longer part of this
+    // order. An order with no remaining linked invoices can be archived.
+    if (allInvoices.length === 0) {
+      const historicalInvoice = await this.prisma.feeInvoice.findFirst({
+        where: { feeOrderId },
+        select: { id: true },
+      });
+      if (historicalInvoice) {
+        await this.prisma.feeOrder.update({
+          where: { id: feeOrderId },
+          data: { isArchived: true, archivedAt: new Date() } as any,
+        });
+      }
+      return;
+    }
 
     const allPaid = allInvoices.every((inv) =>
       this.isEffectivelyPaid(inv.status, Number(inv.balance), Number(inv.amountPaid)),
@@ -256,7 +473,7 @@ export class FinanceService {
 
     if (allPaid) {
       await this.prisma.feeOrder.update({
-        where: { id: invoice.feeOrderId },
+        where: { id: feeOrderId },
         data: { isArchived: true, archivedAt: new Date() } as any,
       });
     }
@@ -374,12 +591,31 @@ export class FinanceService {
               studentId: true,
               firstName: true,
               lastName: true,
+              guardianName: true,
+              class: { select: { id: true, name: true } },
             },
           },
           invoice: {
             select: {
               id: true,
-              feeOrder: { select: { title: true } },
+              amountDue: true,
+              amountPaid: true,
+              balance: true,
+              status: true,
+              dueDate: true,
+              feeOrder: { select: { title: true, description: true } },
+              payments: {
+                orderBy: [{ paidAt: 'asc' }, { id: 'asc' }],
+                select: {
+                  id: true,
+                  paidAt: true,
+                  amount: true,
+                  method: true,
+                  reference: true,
+                  paidBy: true,
+                  notes: true,
+                },
+              },
             },
           },
         },
@@ -387,8 +623,37 @@ export class FinanceService {
       this.prisma.payment.count({ where }),
     ]);
 
+    const enrichedData = data.map((payment) => {
+      const invoice = payment.invoice;
+      if (!invoice) return payment;
+
+      const paymentHistory = invoice.payments.map((entry) => ({
+        ...entry,
+        amount: Number(entry.amount),
+      }));
+      const currentIndex = paymentHistory.findIndex((entry) => entry.id === payment.id);
+      const previousPayments = currentIndex >= 0 ? paymentHistory.slice(0, currentIndex) : [];
+      const previousPaid = previousPayments.reduce((sum, entry) => sum + entry.amount, 0);
+      const paymentAmount = Number(payment.amount);
+
+      return {
+        ...payment,
+        amount: paymentAmount,
+        previousPayments,
+        amountPaidBefore: previousPaid,
+        balanceAtPayment: Math.max(0, Number(invoice.amountDue) - previousPaid - paymentAmount),
+        invoice: {
+          ...invoice,
+          amountDue: Number(invoice.amountDue),
+          amountPaid: Number(invoice.amountPaid),
+          balance: Number(invoice.balance),
+          payments: paymentHistory,
+        },
+      };
+    });
+
     return {
-      data,
+      data: enrichedData,
       meta: { total, page, limit, totalPages: Math.ceil(total / limit) },
     };
   }
@@ -398,13 +663,20 @@ export class FinanceService {
       where: { id: feeOrderId },
       include: {
         class: { select: { id: true, name: true } },
+        feeOrderClasses: {
+          include: { class: { select: { id: true, name: true } } },
+        },
         _count: { select: { invoices: true } },
       },
     });
     if (!feeOrder) throw new NotFoundException('Fee order not found');
 
     const invoices = await this.prisma.feeInvoice.findMany({
-      where: { feeOrderId },
+      where: {
+        feeOrderId,
+        isArchivedDebt: false,
+        debtCancelledAt: null,
+      },
       include: {
         student: {
           select: {
@@ -413,6 +685,7 @@ export class FinanceService {
             firstName: true,
             lastName: true,
             classId: true,
+            isArchived: true,
             class: { select: { name: true } },
           },
         },
@@ -454,6 +727,7 @@ export class FinanceService {
         studentId: inv.student.studentId,
         name: `${inv.student.firstName} ${inv.student.lastName}`,
         className: inv.student.class?.name || '—',
+        isArchived: inv.student.isArchived,
       };
 
       if (this.isEffectivelyPaid(inv.status, bal, paid)) {
@@ -477,7 +751,8 @@ export class FinanceService {
         dueDate: feeOrder.dueDate,
         type: (feeOrder as any).type,
         class: feeOrder.class,
-        invoiceCount: feeOrder._count.invoices,
+        classes: feeOrder.feeOrderClasses.map((entry) => entry.class),
+        invoiceCount: invoices.filter((inv) => Number(inv.balance) > FLOAT_EPSILON).length,
         isArchived: (feeOrder as any).isArchived,
         archivedAt: (feeOrder as any).archivedAt,
       },
@@ -492,7 +767,12 @@ export class FinanceService {
   async getSummary() {
     const [invoices, classes, feeOrders] = await Promise.all([
       this.prisma.feeInvoice.findMany({
-        where: { feeOrder: { isArchived: false } as any },
+        where: {
+          feeOrder: { isArchived: false } as any,
+          student: { isArchived: false },
+          isArchivedDebt: false,
+          debtCancelledAt: null,
+        },
         select: {
           amountDue: true,
           amountPaid: true,
@@ -590,7 +870,9 @@ export class FinanceService {
         foEntry.totalToCollect += due;
         foEntry.totalCollected += paid;
         foEntry.totalOutstanding += bal;
-        foEntry.invoiceCount += 1;
+        if (bal > FLOAT_EPSILON) {
+          foEntry.invoiceCount += 1;
+        }
 
         const studentInfo = {
           studentId: inv.student.studentId,
@@ -631,6 +913,39 @@ export class FinanceService {
     };
   }
 
+  async cancelDebt(invoiceId: string, cancelledById: string) {
+    const invoice = await this.prisma.feeInvoice.findUnique({
+      where: { id: invoiceId },
+      select: {
+        id: true,
+        amountDue: true,
+        amountPaid: true,
+        balance: true,
+        debtCancelledAt: true,
+        isArchivedDebt: true,
+      },
+    });
+
+    if (!invoice) throw new NotFoundException('Invoice not found');
+    if (invoice.debtCancelledAt) {
+      throw new BadRequestException('This debt has already been cancelled');
+    }
+    if (!invoice.isArchivedDebt) {
+      throw new BadRequestException('Only archived student debt can be cancelled');
+    }
+    if (Number(invoice.balance) <= FLOAT_EPSILON) {
+      throw new BadRequestException('This invoice is already fully paid');
+    }
+
+    return this.prisma.feeInvoice.update({
+      where: { id: invoiceId },
+      data: {
+        debtCancelledAt: new Date(),
+        debtCancelledBy: cancelledById,
+      },
+    });
+  }
+
   async getArchivedFeeOrders(page = 1, limit = 10, q?: string) {
     const skip = (page - 1) * limit;
     const where: any = { isArchived: true };
@@ -646,7 +961,7 @@ export class FinanceService {
       ];
     }
 
-    const [data, total] = await Promise.all([
+    const [rawData, total] = await Promise.all([
       this.prisma.feeOrder.findMany({
         where,
         skip,
@@ -654,11 +969,19 @@ export class FinanceService {
         orderBy: { archivedAt: 'desc' } as any,
         include: {
           class: { select: { id: true, name: true } },
+          feeOrderClasses: {
+            include: { class: { select: { id: true, name: true } } },
+          },
           _count: { select: { invoices: true } },
         },
       }),
       this.prisma.feeOrder.count({ where }),
     ]);
+
+    const data = rawData.map(({ feeOrderClasses, ...feeOrder }) => ({
+      ...feeOrder,
+      classes: feeOrderClasses.map((entry) => entry.class),
+    }));
 
     return {
       data,

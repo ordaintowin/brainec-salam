@@ -54,6 +54,9 @@ export class ActivityLogInterceptor implements NestInterceptor {
           } else if (url.includes('/finance/payments')) {
             targetType = 'PAYMENT';
             if (method === 'POST') action = 'RECORD_PAYMENT';
+          } else if (url.includes('/finance/invoices')) {
+            targetType = 'INVOICE';
+            if (method === 'POST') action = 'CANCEL_DEBT';
           } else if (url.includes('/attendance')) {
             targetType = 'ATTENDANCE';
             if (method === 'POST') action = 'MARK_ATTENDANCE';

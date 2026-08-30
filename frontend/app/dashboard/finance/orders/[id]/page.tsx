@@ -13,6 +13,7 @@ interface FeeOrderDetail {
   dueDate: string;
   type: 'CLASS' | 'INDIVIDUAL' | 'ALL';
   class?: { id: string; name: string } | null;
+  classes?: { id: string; name: string }[];
   invoiceCount: number;
   isArchived?: boolean;
   archivedAt?: string;
@@ -26,6 +27,7 @@ interface StudentEntry {
   amountPaid: number;
   amountDue: number;
   balance?: number;
+  isArchived?: boolean;
 }
 
 interface FeeOrderSummaryData {
@@ -141,7 +143,16 @@ export default function FeeOrderDetailPage() {
             <div className="flex flex-wrap gap-x-5 gap-y-1 text-sm text-gray-500">
               <span>Unit amount: <span className="font-semibold text-gray-800">{formatCurrency(feeOrder.amount)}</span></span>
               <span>Due date: <span className="font-semibold text-gray-800">{formatDate(feeOrder.dueDate)}</span></span>
-              {feeOrder.class && <span>Class: <span className="font-semibold text-gray-800">{feeOrder.class.name}</span></span>}
+              {(feeOrder.classes?.length || feeOrder.class) && (
+                <span>
+                  Class{(feeOrder.classes?.length || 0) > 1 ? 'es' : ''}:{' '}
+                  <span className="font-semibold text-gray-800">
+                    {feeOrder.classes?.length
+                      ? feeOrder.classes.map(cls => cls.name).join(', ')
+                      : feeOrder.class?.name}
+                  </span>
+                </span>
+              )}
               <span><span className="font-semibold text-gray-800">{feeOrder.invoiceCount}</span> invoice{feeOrder.invoiceCount !== 1 ? 's' : ''}</span>
             </div>
             {feeOrder.description && (
@@ -184,7 +195,7 @@ export default function FeeOrderDetailPage() {
       {/* Section tabs */}
       {(owingStudents.length > 0 || paidStudents.length > 0) && (
         <>
-          <div className="flex gap-1 mb-4 border-b border-gray-200">
+         <div className="mobile-tabs flex gap-1 mb-4 border-b border-gray-200">
             {owingStudents.length > 0 && (
               <button
                 onClick={() => setActiveSection('owing')}
@@ -280,6 +291,11 @@ export default function FeeOrderDetailPage() {
                           <div className="flex items-center gap-2">
                             <CheckCircle2 className="w-3.5 h-3.5 text-green-500 shrink-0" />
                             {s.name}
+                            {s.isArchived && (
+                              <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-gray-100 text-gray-500 border border-gray-200">
+                                No longer enrolled
+                              </span>
+                            )}
                           </div>
                         </td>
                         <td className="px-4 py-3 text-gray-500 font-mono text-xs">{s.studentId}</td>

@@ -86,6 +86,16 @@ function SuccessReceiptView({ receiptData, studentName, studentCode, onClose }: 
             .amount-label { color: #555; }
             .amount-value { font-weight: 600; }
             .footer { margin-top: 40px; border-top: 1px solid #e5e7eb; padding-top: 12px; display: flex; justify-content: space-between; font-size: 11px; color: #888; }
+             @media (max-width: 640px) {
+               body { padding: 16px; }
+               .header { display: block; }
+               .doc-title, .doc-id { text-align: left; margin-top: 8px; }
+               table { display: block; overflow-x: auto; white-space: nowrap; }
+               .amount-row { align-items: flex-start; gap: 16px; }
+               .amount-value { text-align: right; overflow-wrap: anywhere; }
+               .footer { display: block; }
+               .footer span { display: block; margin-bottom: 4px; }
+             }
             @media print { body { padding: 16px; } }
           </style>
         </head>
@@ -203,7 +213,7 @@ function SuccessReceiptView({ receiptData, studentName, studentCode, onClose }: 
         </div>
       </div>
 
-      <div className="flex gap-3 justify-end">
+      <div className="mobile-modal-actions flex gap-3 justify-end">
         <button
           onClick={handlePrint}
           className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-[#16a34a] hover:bg-green-700 rounded-lg"
@@ -399,7 +409,7 @@ export default function BulkPaymentModal({
                 />
               </div>
 
-              <div className="flex gap-3 justify-end pt-2">
+              <div className="mobile-modal-actions flex gap-3 justify-end pt-2">
                 <button
                   type="button"
                   onClick={handleClose}

@@ -84,7 +84,7 @@ export default function Sidebar({ className = '', onNavigate, showCloseButton = 
   };
 
   return (
-    <aside className={`w-64 bg-[#16a34a] flex flex-col h-full shrink-0 ${className}`}>
+    <aside className={`w-64 max-w-[calc(100vw-1rem)] bg-[#16a34a] flex flex-col h-full shrink-0 ${className}`}>
       {/* Brand */}
       <div className="flex items-center gap-3 px-6 py-5 border-b border-green-600">
         <div className="w-9 h-9 bg-white rounded-lg flex items-center justify-center shrink-0">

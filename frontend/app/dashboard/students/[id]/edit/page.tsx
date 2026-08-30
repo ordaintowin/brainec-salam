@@ -217,7 +217,7 @@ export default function EditStudentPage() {
           />
         </div>
 
-        <div className="flex gap-3 justify-end pt-2">
+        <div className="mobile-modal-actions flex gap-3 justify-end pt-2">
           <button type="button" onClick={() => router.back()} className="px-4 py-2 text-sm text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50">
             Cancel
           </button>

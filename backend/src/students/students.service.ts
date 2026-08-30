@@ -91,6 +91,10 @@ export class StudentsService {
       include: {
         class: true,
         feeInvoices: {
+          where: {
+            balance: { gt: 0 },
+            debtCancelledAt: null,
+          },
           include: { feeOrder: true },
           orderBy: { createdAt: 'desc' },
         },
@@ -120,15 +124,76 @@ export class StudentsService {
 
   async archive(id: string, archiveReason: string, archivedBy: string) {
     await this.findOne(id);
-    return this.prisma.student.update({
-      where: { id },
-      data: {
-        isArchived: true,
-        archivedAt: new Date(),
-        archivedBy,
-        archiveReason,
-      },
+    const result = await this.prisma.$transaction(async (tx) => {
+      // Retain outstanding invoices for the student's profile, but mark them
+      // as archived debt so they do not return to school-wide finance reports
+      // if the student is restored.
+      const outstandingInvoices = await tx.feeInvoice.findMany({
+        where: {
+          studentId: id,
+          balance: { gt: 0 },
+          debtCancelledAt: null,
+        },
+        select: { id: true },
+      });
+
+      if (outstandingInvoices.length > 0) {
+        await tx.feeInvoice.updateMany({
+          where: { id: { in: outstandingInvoices.map((invoice) => invoice.id) } },
+          data: { isArchivedDebt: true },
+        });
+      }
+
+      const student = await tx.student.update({
+        where: { id },
+        data: {
+          isArchived: true,
+          archivedAt: new Date(),
+          archivedBy,
+          archiveReason,
+        },
+      });
+
+      return {
+        ...student,
+        archivedDebtInvoices: outstandingInvoices.length,
+      };
     });
+
+    // Removing a student disconnects their invoices from fee-order progress.
+    // Reconcile affected orders immediately so an order with no remaining
+    // active invoices can move to the archive without waiting for another
+    // payment.
+    const affectedFeeOrders = await this.prisma.feeInvoice.findMany({
+      where: { studentId: id },
+      select: { feeOrderId: true },
+      distinct: ['feeOrderId'],
+    });
+
+    for (const { feeOrderId } of affectedFeeOrders) {
+      const activeInvoices = await this.prisma.feeInvoice.findMany({
+        where: {
+          feeOrderId,
+          student: { isArchived: false },
+          isArchivedDebt: false,
+          debtCancelledAt: null,
+        },
+        select: { balance: true },
+      });
+
+      const hasOutstandingActiveInvoice = activeInvoices.some(
+        (invoice) => Number(invoice.balance) > 0.001,
+      );
+
+      if (!hasOutstandingActiveInvoice) {
+        await this.prisma.feeOrder.update({
+          where: { id: feeOrderId },
+          data: { isArchived: true, archivedAt: new Date() } as any,
+        });
+      }
+    }
+
+    return result;
   }
 
   async findAllArchived(page = 1, limit = 20) {
@@ -152,6 +217,14 @@ export class StudentsService {
   async restore(id: string) {
     const student = await this.prisma.student.findUnique({ where: { id } });
     if (!student) throw new NotFoundException('Student not found');
+    await this.prisma.feeInvoice.updateMany({
+      where: {
+        studentId: id,
+        balance: { gt: 0 },
+        debtCancelledAt: null,
+      },
+      data: { isArchivedDebt: true },
+    });
     return this.prisma.student.update({
       where: { id },
       data: {

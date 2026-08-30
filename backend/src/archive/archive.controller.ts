@@ -2,6 +2,7 @@ import {
   Controller,
   Get,
   Post,
+  Delete,
   Param,
   Query,
   ParseIntPipe,
@@ -37,8 +38,18 @@ export class ArchiveController {
     return this.archiveService.restoreStudent(id);
   }
 
+  @Delete('students/:id')
+  deleteStudent(@Param('id') id: string) {
+    return this.archiveService.deleteStudent(id);
+  }
+
   @Post('teachers/:id/restore')
   restoreTeacher(@Param('id') id: string) {
     return this.archiveService.restoreTeacher(id);
+  }
+
+  @Delete('teachers/:id')
+  deleteTeacher(@Param('id') id: string) {
+    return this.archiveService.deleteTeacher(id);
   }
 }

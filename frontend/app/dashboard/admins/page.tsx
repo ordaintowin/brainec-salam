@@ -177,7 +177,7 @@ export default function AdminsPage() {
 
   return (
     <div className="p-8">
-      <div className="flex items-center justify-between mb-6">
+      <div className="mobile-page-header flex items-center justify-between mb-6">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Admins</h1>
           <p className="text-gray-500 text-sm mt-1">Manage system administrators</p>
@@ -344,7 +344,7 @@ export default function AdminsPage() {
                   <option value="HEADMISTRESS">Admin (Level 1)</option>
                 </select>
               </div>
-              <div className="flex gap-3 justify-end">
+              <div className="mobile-modal-actions flex gap-3 justify-end">
                 <button type="button" onClick={() => setShowCreateModal(false)} className="px-4 py-2 text-sm text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50">Cancel</button>
                 <button type="submit" disabled={isSubmitting} className="px-4 py-2 text-sm text-white bg-[#16a34a] hover:bg-green-700 rounded-lg disabled:opacity-60 flex items-center gap-2">
                   {isSubmitting && <Loader2 className="w-4 h-4 animate-spin" />}
@@ -377,7 +377,7 @@ export default function AdminsPage() {
                 <input type="email" {...registerEdit('email')} className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#16a34a]" />
                 {editErrors.email && <p className="text-red-500 text-xs mt-1">{editErrors.email.message}</p>}
               </div>
-              <div className="flex gap-3 justify-end">
+              <div className="mobile-modal-actions flex gap-3 justify-end">
                 <button type="button" onClick={() => setEditModal({ open: false, admin: null })} className="px-4 py-2 text-sm text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50">Cancel</button>
                 <button type="submit" disabled={editSubmitting} className="px-4 py-2 text-sm text-white bg-[#16a34a] hover:bg-green-700 rounded-lg disabled:opacity-60 flex items-center gap-2">
                   {editSubmitting && <Loader2 className="w-4 h-4 animate-spin" />}
@@ -416,7 +416,7 @@ export default function AdminsPage() {
                 </div>
                 {resetErrors.password && <p className="text-red-500 text-xs mt-1">{resetErrors.password.message}</p>}
               </div>
-              <div className="flex gap-3 justify-end">
+              <div className="mobile-modal-actions flex gap-3 justify-end">
                 <button type="button" onClick={() => setResetModal({ open: false, admin: null })} className="px-4 py-2 text-sm text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50">Cancel</button>
                 <button type="submit" disabled={resetSubmitting} className="px-4 py-2 text-sm text-white bg-[#16a34a] hover:bg-green-700 rounded-lg disabled:opacity-60 flex items-center gap-2">
                   {resetSubmitting && <Loader2 className="w-4 h-4 animate-spin" />}

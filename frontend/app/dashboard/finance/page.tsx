@@ -1,7 +1,7 @@
 'use client';
 import { useEffect, useState, useCallback } from 'react';
 import Link from 'next/link';
-import { Plus, X, Loader2, Download, Printer, ChevronRight, ChevronDown } from 'lucide-react';
+import { Plus, X, Loader2, Download, Printer, ChevronRight, ChevronDown, Pencil, Trash2 } from 'lucide-react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
@@ -11,6 +11,8 @@ import PaymentStatusBadge from '@/components/PaymentStatusBadge';
 import LiveSearch from '@/components/LiveSearch';
 import RecordPaymentModal from '@/components/RecordPaymentModal';
 import PrintInvoiceModal from '@/components/PrintInvoiceModal';
+import PrintFinanceSummaryButton from '@/components/PrintFinanceSummaryButton';
+import ConfirmModal from '@/components/ConfirmModal';
 import { formatCurrency, formatDate, exportToCSV } from '@/lib/utils';
 
 type ActiveTab = 'feeOrders' | 'invoices' | 'payments' | 'summary' | 'archives';
@@ -21,14 +23,25 @@ interface FeeOrder {
   amount: number;
   dueDate: string;
   archivedAt?: string;
+  isArchived?: boolean;
   type?: 'CLASS' | 'INDIVIDUAL' | 'ALL';
-  class?: { name: string };
+  class?: { id?: string; name: string };
+  classes?: { id: string; name: string }[];
   _count?: { invoices: number };
+  totalPaid?: number;
+  canDelete?: boolean;
 }
 
 interface Invoice {
   id: string;
-  student?: { id: string; firstName: string; lastName: string; studentId: string };
+  student?: {
+    id: string;
+    firstName: string;
+    lastName: string;
+    studentId: string;
+    class?: { id: string; name: string };
+    guardianName?: string;
+  };
   feeOrder?: { title: string };
   amountDue: number;
   amountPaid: number;
@@ -44,8 +57,33 @@ interface Payment {
   method: string;
   reference?: string;
   paidBy: string;
-  student?: { firstName: string; lastName: string };
-  invoice?: { id: string; feeOrder?: { title: string } };
+  student?: {
+    studentId: string;
+    firstName: string;
+    lastName: string;
+    guardianName?: string;
+    class?: { id: string; name: string };
+  };
+  previousPayments?: {
+    id: string;
+    paidAt: string;
+    amount: number;
+    method: string;
+    reference?: string;
+    paidBy: string;
+    notes?: string;
+  }[];
+  amountPaidBefore?: number;
+  balanceAtPayment?: number;
+  invoice?: {
+    id: string;
+    amountDue: number;
+    amountPaid: number;
+    balance: number;
+    status: string;
+    dueDate: string;
+    feeOrder?: { title: string; description?: string };
+  };
 }
 
 interface FeeOrderBreakdown {
@@ -73,7 +111,7 @@ const feeOrderSchema = z.object({
   name: z.string().min(1, 'Name is required'),
   amount: z.string().min(1, 'Amount is required'),
   dueDate: z.string().min(1, 'Due date is required'),
-  classId: z.string().optional(),
+  classIds: z.array(z.string()).optional(),
   applyToAll: z.boolean().optional(),
 });
 
@@ -105,11 +143,15 @@ export default function FinancePage() {
   const [paymentTotalPages, setPaymentTotalPages] = useState(1);
   const [loading, setLoading] = useState(true);
   const [showFeeOrderModal, setShowFeeOrderModal] = useState(false);
+  const [editingFeeOrder, setEditingFeeOrder] = useState<FeeOrder | null>(null);
   const [feeOrderError, setFeeOrderError] = useState('');
+  const [actionError, setActionError] = useState('');
+  const [deleteTarget, setDeleteTarget] = useState<FeeOrder | null>(null);
+  const [deleteSubmitting, setDeleteSubmitting] = useState(false);
   const [paymentModal, setPaymentModal] = useState<{ open: boolean; invoiceId: string; studentId: string; balance: number }>({
     open: false, invoiceId: '', studentId: '', balance: 0,
   });
-  const [printModal, setPrintModal] = useState<{ open: boolean; invoice: Invoice | null }>({ open: false, invoice: null });
+  const [printModal, setPrintModal] = useState<{ open: boolean; invoice: Invoice | null; payment?: Payment }>({ open: false, invoice: null });
   const [expandedFeeOrders, setExpandedFeeOrders] = useState<Set<string>>(new Set());
   const [summaryPage, setSummaryPage] = useState(1);
   const summaryPerPage = 5;
@@ -117,6 +159,7 @@ export default function FinancePage() {
   const [studentSearch, setStudentSearch] = useState('');
   const [studentResults, setStudentResults] = useState<StudentOption[]>([]);
   const [selectedStudents, setSelectedStudents] = useState<StudentOption[]>([]);
+  const [selectedClassIds, setSelectedClassIds] = useState<string[]>([]);
   const [studentSearchLoading, setStudentSearchLoading] = useState(false);
 
   const toggleFeeOrderExpanded = (id: string) => {
@@ -285,30 +328,95 @@ export default function FinancePage() {
     setSelectedStudents(prev => prev.filter(s => s.id !== id));
   };
 
-  const onCreateFeeOrder = async (data: FeeOrderForm) => {
+  const openCreateFeeOrder = () => {
+    setEditingFeeOrder(null);
+    resetFeeForm();
+    setFeeOrderError('');
+    setActionError('');
+    setOrderMode('class');
+    setSelectedStudents([]);
+    setSelectedClassIds([]);
+    setStudentSearch('');
+    setShowFeeOrderModal(true);
+  };
+
+  const openEditFeeOrder = async (feeOrder: FeeOrder) => {
+    setActionError('');
+    setFeeOrderError('');
+    setEditingFeeOrder(feeOrder);
+    const existingClassIds = feeOrder.classes?.length
+      ? feeOrder.classes.map(c => c.id)
+      : feeOrder.class?.id
+        ? [feeOrder.class.id]
+        : [];
+    setOrderMode('class');
+    setSelectedClassIds(existingClassIds);
+    setStudentSearch('');
+    setSelectedStudents([]);
+
+    resetFeeForm({
+      name: feeOrder.title,
+      amount: String(feeOrder.amount),
+      dueDate: feeOrder.dueDate ? feeOrder.dueDate.slice(0, 10) : '',
+      applyToAll: feeOrder.type === 'ALL',
+      classIds: existingClassIds,
+    });
+    setShowFeeOrderModal(true);
+  };
+
+  const onSaveFeeOrder = async (data: FeeOrderForm) => {
     setFeeOrderError('');
     try {
+      if (orderMode === 'class' && !data.applyToAll && selectedClassIds.length === 0) {
+        setFeeOrderError('Select at least one class or choose “Apply to all students”.');
+        return;
+      }
+
       const payload: Record<string, unknown> = {
         title: data.name,
         amount: parseFloat(data.amount),
         dueDate: data.dueDate,
       };
-      if (orderMode === 'individual' && selectedStudents.length > 0) {
-        payload.studentIds = selectedStudents.map(s => s.id);
-        payload.type = 'INDIVIDUAL';
-      } else if (data.applyToAll) {
-        payload.type = 'ALL';
+      if (editingFeeOrder) {
+        await api.patch(`/finance/fee-orders/${editingFeeOrder.id}`, payload);
       } else {
-        payload.classId = data.classId || undefined;
-        payload.type = 'CLASS';
+        if (orderMode === 'individual' && selectedStudents.length > 0) {
+          payload.studentIds = selectedStudents.map(s => s.id);
+          payload.type = 'INDIVIDUAL';
+        } else if (data.applyToAll) {
+          payload.type = 'ALL';
+        } else {
+          payload.classIds = selectedClassIds;
+          payload.type = 'CLASS';
+        }
+        await api.post('/finance/fee-orders', payload);
       }
-      await api.post('/finance/fee-orders', payload);
       setShowFeeOrderModal(false);
+      setEditingFeeOrder(null);
       resetFeeForm();
-      fetchFeeOrders();
+      await fetchFeeOrders();
     } catch (err: unknown) {
-      const message = (err as { response?: { data?: { message?: string } } })?.response?.data?.message || 'Failed to create fee order';
-      setFeeOrderError(message);
+      const responseMessage = (err as { response?: { data?: { message?: string | string[] } } })?.response?.data?.message;
+      const message = Array.isArray(responseMessage) ? responseMessage.join(', ') : responseMessage;
+      setFeeOrderError(message || (editingFeeOrder ? 'Failed to update fee order' : 'Failed to create fee order'));
+    }
+  };
+
+  const deleteFeeOrder = async () => {
+    if (!deleteTarget) return;
+    setDeleteSubmitting(true);
+    setActionError('');
+    try {
+      await api.delete(`/finance/fee-orders/${deleteTarget.id}`);
+      setDeleteTarget(null);
+      await fetchFeeOrders();
+    } catch (err: unknown) {
+      const responseMessage = (err as { response?: { data?: { message?: string | string[] } } })?.response?.data?.message;
+      const message = Array.isArray(responseMessage) ? responseMessage.join(', ') : responseMessage;
+      setActionError(message || 'Failed to delete fee order');
+      setDeleteTarget(null);
+    } finally {
+      setDeleteSubmitting(false);
     }
   };
 
@@ -322,14 +430,14 @@ export default function FinancePage() {
 
   return (
     <div className="p-8">
-      <div className="flex items-center justify-between mb-6">
+      <div className="mobile-page-header flex items-center justify-between mb-6">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Finance</h1>
           <p className="text-gray-500 text-sm mt-1">Manage fees, invoices and payments</p>
         </div>
         {canManage && activeTab === 'feeOrders' && (
-          <button
-            onClick={() => { resetFeeForm(); setFeeOrderError(''); setOrderMode('class'); setSelectedStudents([]); setStudentSearch(''); setShowFeeOrderModal(true); }}
+           <button
+             onClick={openCreateFeeOrder}
             className="flex items-center gap-2 bg-[#16a34a] hover:bg-green-700 text-white px-4 py-2 rounded-lg text-sm font-medium"
           >
             <Plus className="w-4 h-4" />
@@ -381,7 +489,7 @@ export default function FinancePage() {
 
       {/* Tabs */}
       <div className="border-b border-gray-200 mb-6">
-        <div className="flex gap-0">
+        <div className="mobile-tabs flex gap-0">
           {tabs.map(tab => (
             <button
               key={tab.key}
@@ -407,6 +515,12 @@ export default function FinancePage() {
           {loading ? (
             <div className="space-y-3">{[...Array(4)].map((_, i) => <div key={i} className="h-12 bg-gray-100 rounded animate-pulse" />)}</div>
           ) : (
+            <>
+            {actionError && (
+              <div className="mb-4 p-3 bg-red-50 border border-red-200 text-red-700 rounded-lg text-sm">
+                {actionError}
+              </div>
+            )}
             <div className="overflow-x-auto rounded-lg border border-gray-200">
               <table className="w-full text-sm">
                 <thead>
@@ -417,11 +531,12 @@ export default function FinancePage() {
                     <th className="text-left px-4 py-3 text-xs text-gray-400 font-medium uppercase">Class</th>
                     <th className="text-left px-4 py-3 text-xs text-gray-400 font-medium uppercase">Due Date</th>
                     <th className="text-left px-4 py-3 text-xs text-gray-400 font-medium uppercase">Invoices</th>
+                    {canManage && <th className="text-left px-4 py-3 text-xs text-gray-400 font-medium uppercase">Actions</th>}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100">
                   {feeOrders.length === 0 ? (
-                    <tr><td colSpan={6} className="px-4 py-8 text-center text-gray-400">No fee orders found.</td></tr>
+                     <tr><td colSpan={canManage ? 7 : 6} className="px-4 py-8 text-center text-gray-400">No fee orders found.</td></tr>
                   ) : (
                     feeOrders.map(fo => (
                       <tr key={fo.id} className="hover:bg-gray-50">
@@ -436,22 +551,61 @@ export default function FinancePage() {
                             <span className="px-2 py-0.5 rounded text-xs font-medium bg-purple-50 text-purple-700">All</span>
                           )}
                         </td>
-                        <td className="px-4 py-3 text-gray-600">{fo.class?.name || '—'}</td>
+                         <td className="px-4 py-3 text-gray-600">
+                           {fo.classes?.length
+                             ? fo.classes.map(c => c.name).join(', ')
+                             : fo.class?.name || '—'}
+                         </td>
                         <td className="px-4 py-3 text-gray-600">{formatDate(fo.dueDate)}</td>
                         <td className="px-4 py-3 text-gray-600">{fo._count?.invoices ?? 0}</td>
+                         {canManage && (
+                           <td className="px-4 py-3">
+                             <div className="flex items-center gap-2">
+                               <Link
+                                 href={`/dashboard/finance/orders/${fo.id}`}
+                                 className="text-xs text-gray-500 hover:text-gray-800 hover:underline"
+                               >
+                                 View
+                               </Link>
+                               <button
+                                 type="button"
+                                 onClick={() => openEditFeeOrder(fo)}
+                                 className="inline-flex items-center gap-1 text-xs text-[#16a34a] hover:text-green-700 font-medium"
+                                 title="Edit fee order"
+                               >
+                                 <Pencil className="w-3.5 h-3.5" />
+                                 Edit
+                               </button>
+                               <button
+                                 type="button"
+                                 onClick={() => fo.canDelete && setDeleteTarget(fo)}
+                                 disabled={!fo.canDelete}
+                                 className="inline-flex items-center gap-1 text-xs text-red-600 hover:text-red-700 font-medium disabled:text-gray-300 disabled:cursor-not-allowed"
+                                 title={fo.canDelete ? 'Delete fee order' : 'Orders with payments cannot be deleted'}
+                               >
+                                 <Trash2 className="w-3.5 h-3.5" />
+                                 Delete
+                               </button>
+                             </div>
+                             {!fo.canDelete && (
+                               <span className="block text-[11px] text-gray-400 mt-1">Payment recorded · protected</span>
+                             )}
+                           </td>
+                         )}
                       </tr>
                     ))
                   )}
                 </tbody>
               </table>
-            </div>
+             </div>
+             </>
           )}
 
           {/* Fee Orders Pagination */}
           {feeOrderTotalPages > 1 && (
-            <div className="flex items-center justify-between mt-4">
+            <div className="mobile-pagination flex items-center justify-between mt-4">
               <p className="text-sm text-gray-500">Page {feeOrderPage} of {feeOrderTotalPages}</p>
-              <div className="flex gap-1">
+              <div className="mobile-pagination-controls flex gap-1">
                 <button onClick={() => setFeeOrderPage(p => p - 1)} disabled={feeOrderPage <= 1} className="px-3 py-1.5 text-sm border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-40">Previous</button>
                 <button onClick={() => setFeeOrderPage(p => p + 1)} disabled={feeOrderPage >= feeOrderTotalPages} className="px-3 py-1.5 text-sm border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-40">Next</button>
               </div>
@@ -530,9 +684,9 @@ export default function FinancePage() {
 
           {/* Pagination */}
           {invoiceTotalPages > 1 && (
-            <div className="flex items-center justify-between mt-4">
+            <div className="mobile-pagination flex items-center justify-between mt-4">
               <p className="text-sm text-gray-500">Page {invoicePage} of {invoiceTotalPages}</p>
-              <div className="flex gap-1">
+              <div className="mobile-pagination-controls flex gap-1">
                 <button onClick={() => setInvoicePage(p => p - 1)} disabled={invoicePage <= 1} className="px-3 py-1.5 text-sm border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-40">Previous</button>
                 <button onClick={() => setInvoicePage(p => p + 1)} disabled={invoicePage >= invoiceTotalPages} className="px-3 py-1.5 text-sm border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-40">Next</button>
               </div>
@@ -554,6 +708,8 @@ export default function FinancePage() {
                 <th className="text-left px-4 py-3 text-xs text-gray-400 font-medium uppercase">Date</th>
                 <th className="text-left px-4 py-3 text-xs text-gray-400 font-medium uppercase">Invoice #</th>
                 <th className="text-left px-4 py-3 text-xs text-gray-400 font-medium uppercase">Student</th>
+                 <th className="text-left px-4 py-3 text-xs text-gray-400 font-medium uppercase">Class</th>
+                 <th className="text-left px-4 py-3 text-xs text-gray-400 font-medium uppercase">Parent</th>
                 <th className="text-left px-4 py-3 text-xs text-gray-400 font-medium uppercase">Amount</th>
                 <th className="text-left px-4 py-3 text-xs text-gray-400 font-medium uppercase">Method</th>
                 <th className="text-left px-4 py-3 text-xs text-gray-400 font-medium uppercase">Paid By</th>
@@ -563,7 +719,7 @@ export default function FinancePage() {
             </thead>
             <tbody className="divide-y divide-gray-100">
               {payments.length === 0 ? (
-                <tr><td colSpan={8} className="px-4 py-8 text-center text-gray-400">No payments recorded.</td></tr>
+                 <tr><td colSpan={10} className="px-4 py-8 text-center text-gray-400">No payments recorded.</td></tr>
               ) : (
                 payments.map(p => (
                   <tr key={p.id} className="hover:bg-gray-50">
@@ -572,6 +728,8 @@ export default function FinancePage() {
                     <td className="px-4 py-3">
                       {p.student ? `${p.student.firstName} ${p.student.lastName}` : '—'}
                     </td>
+                     <td className="px-4 py-3 text-gray-600">{p.student?.class?.name || '—'}</td>
+                     <td className="px-4 py-3 text-gray-600">{p.student?.guardianName || '—'}</td>
                     <td className="px-4 py-3 font-medium text-green-700">{formatCurrency(p.amount)}</td>
                     <td className="px-4 py-3 text-gray-600 capitalize">{p.method.replace('_', ' ').toLowerCase()}</td>
                     <td className="px-4 py-3 text-gray-600">{p.paidBy}</td>
@@ -580,8 +738,30 @@ export default function FinancePage() {
                       {p.invoice && (
                         <button
                           onClick={() => {
-                            const inv = invoices.find(i => i.id === p.invoice?.id);
-                            if (inv) setPrintModal({ open: true, invoice: inv });
+                             if (!p.invoice) return;
+                             setPrintModal({
+                               open: true,
+                               payment: p,
+                               invoice: {
+                                 id: p.invoice.id,
+                                 amountDue: p.invoice.amountDue,
+                                 amountPaid: p.invoice.amountPaid,
+                                 balance: p.invoice.balance,
+                                 status: p.invoice.status,
+                                 dueDate: p.invoice.dueDate,
+                                 feeOrder: p.invoice.feeOrder,
+                                 student: p.student
+                                   ? {
+                                       id: '',
+                                        studentId: p.student.studentId,
+                                       firstName: p.student.firstName,
+                                       lastName: p.student.lastName,
+                                        class: p.student.class,
+                                        guardianName: p.student.guardianName,
+                                     }
+                                   : undefined,
+                               },
+                             });
                           }}
                           className="p-1.5 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded"
                           title="Print receipt"
@@ -597,9 +777,9 @@ export default function FinancePage() {
           </table>
           </div>
           {paymentTotalPages > 1 && (
-            <div className="flex items-center justify-between px-4 py-3 border-t border-gray-100">
+            <div className="mobile-pagination flex items-center justify-between px-4 py-3 border-t border-gray-100">
               <p className="text-sm text-gray-500">Page {paymentPage} of {paymentTotalPages}</p>
-              <div className="flex gap-1">
+              <div className="mobile-pagination-controls flex gap-1">
                 <button onClick={() => setPaymentPage(p => p - 1)} disabled={paymentPage <= 1} className="px-3 py-1.5 text-sm border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-40">Previous</button>
                 <button onClick={() => setPaymentPage(p => p + 1)} disabled={paymentPage >= paymentTotalPages} className="px-3 py-1.5 text-sm border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-40">Next</button>
               </div>
@@ -613,6 +793,13 @@ export default function FinancePage() {
         <div className="space-y-6">
           {summary ? (
             <>
+                      <div className="mobile-card-header flex items-center justify-between gap-4">
+                <div>
+                  <h2 className="text-lg font-semibold text-gray-900">Finance Summary</h2>
+                  <p className="text-sm text-gray-500 mt-1">Current collection, outstanding, and overdue fee totals.</p>
+                </div>
+                {canManage && <PrintFinanceSummaryButton summary={summary} />}
+              </div>
               {/* Clickable Overall Stats */}
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <Link
@@ -693,6 +880,23 @@ export default function FinancePage() {
                             </div>
                           </button>
 
+                          {canManage && (
+                            <div className="px-5 pb-3 flex justify-end">
+                              <PrintFinanceSummaryButton
+                                summary={{
+                                  totalCollected: fo.totalCollected,
+                                  totalOutstanding: fo.totalOutstanding,
+                                  totalOverdue: new Date(fo.dueDate) < new Date() ? fo.totalOutstanding : 0,
+                                  perClassBreakdown: [],
+                                }}
+                                feeOrders={[fo]}
+                                reportTitle={`${fo.title} Summary`}
+                                includeClassBreakdown={false}
+                                buttonLabel="Print"
+                              />
+                            </div>
+                          )}
+
                           {isExpanded && (
                             <div className="px-5 pb-5 border-t border-gray-100 pt-4">
                               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
@@ -719,9 +923,9 @@ export default function FinancePage() {
 
                     {/* Summary Pagination */}
                     {totalSummaryPages > 1 && (
-                      <div className="flex items-center justify-between mt-4">
+                      <div className="mobile-pagination flex items-center justify-between mt-4">
                         <p className="text-sm text-gray-500">Page {summaryPage} of {totalSummaryPages} ({totalFeeOrders} fee order{totalFeeOrders !== 1 ? 's' : ''})</p>
-                        <div className="flex gap-1">
+                        <div className="mobile-pagination-controls flex gap-1">
                           <button onClick={() => setSummaryPage(p => p - 1)} disabled={summaryPage <= 1} className="px-3 py-1.5 text-sm border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-40">Previous</button>
                           <button onClick={() => setSummaryPage(p => p + 1)} disabled={summaryPage >= totalSummaryPages} className="px-3 py-1.5 text-sm border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-40">Next</button>
                         </div>
@@ -783,7 +987,11 @@ export default function FinancePage() {
                             <span className="px-2 py-0.5 rounded text-xs font-medium bg-purple-50 text-purple-700">All</span>
                           )}
                         </td>
-                        <td className="px-4 py-3 text-gray-600">{fo.class?.name || '—'}</td>
+                        <td className="px-4 py-3 text-gray-600">
+                          {fo.classes?.length
+                            ? fo.classes.map(c => c.name).join(', ')
+                            : fo.class?.name || '—'}
+                        </td>
                         <td className="px-4 py-3 text-gray-600">{formatDate(fo.dueDate)}</td>
                         <td className="px-4 py-3 text-gray-600">{fo._count?.invoices ?? 0}</td>
                         <td className="px-4 py-3 text-gray-500">{fo.archivedAt ? formatDate(fo.archivedAt) : '—'}</td>
@@ -805,9 +1013,9 @@ export default function FinancePage() {
 
           {/* Archives Pagination */}
           {archivedFeeOrdersTotalPages > 1 && (
-            <div className="flex items-center justify-between mt-4">
+            <div className="mobile-pagination flex items-center justify-between mt-4">
               <p className="text-sm text-gray-500">Page {archivedFeeOrdersPage} of {archivedFeeOrdersTotalPages}</p>
-              <div className="flex gap-1">
+              <div className="mobile-pagination-controls flex gap-1">
                 <button onClick={() => setArchivedFeeOrdersPage(p => p - 1)} disabled={archivedFeeOrdersPage <= 1} className="px-3 py-1.5 text-sm border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-40">Previous</button>
                 <button onClick={() => setArchivedFeeOrdersPage(p => p + 1)} disabled={archivedFeeOrdersPage >= archivedFeeOrdersTotalPages} className="px-3 py-1.5 text-sm border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-40">Next</button>
               </div>
@@ -816,17 +1024,23 @@ export default function FinancePage() {
         </div>
       )}
 
-      {/* Create Fee Order Modal */}
+      {/* Create / Edit Fee Order Modal */}
       {showFeeOrderModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center">
           <div className="absolute inset-0 bg-black/50" onClick={() => setShowFeeOrderModal(false)} />
           <div className="relative bg-white rounded-xl shadow-xl p-6 w-full max-w-lg mx-4 max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between mb-5">
-              <h2 className="text-lg font-semibold text-gray-900">Create Fee Order</h2>
-              <button onClick={() => setShowFeeOrderModal(false)} className="text-gray-400 hover:text-gray-600"><X className="w-5 h-5" /></button>
+              <h2 className="text-lg font-semibold text-gray-900">{editingFeeOrder ? 'Edit Fee Order' : 'Create Fee Order'}</h2>
+              <button onClick={() => { setShowFeeOrderModal(false); setEditingFeeOrder(null); }} className="text-gray-400 hover:text-gray-600"><X className="w-5 h-5" /></button>
             </div>
             {feeOrderError && <div className="mb-4 p-3 bg-red-50 border border-red-200 text-red-700 rounded-lg text-sm">{feeOrderError}</div>}
-            <form onSubmit={handleSubmit(onCreateFeeOrder)} className="space-y-4">
+            <form onSubmit={handleSubmit(onSaveFeeOrder)} className="space-y-4">
+               {editingFeeOrder && (
+                <p className="text-xs text-gray-500 bg-gray-50 border border-gray-200 rounded-lg px-3 py-2">
+                   Only the invoice name, amount, and due date can be changed. Existing recipients and payment history are preserved.
+                </p>
+              )}
+
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Fee Name *</label>
                 <input {...register('name')} className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#16a34a]" placeholder="e.g. Term 1 School Fees" />
@@ -845,8 +1059,8 @@ export default function FinancePage() {
                 </div>
               </div>
 
-              {/* Order Mode Toggle */}
-              <div>
+               {/* Recipient controls are available when creating, but never while editing. */}
+               {!editingFeeOrder && <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">Apply To</label>
                 <div className="flex gap-2">
                   <button
@@ -872,24 +1086,56 @@ export default function FinancePage() {
                     Individual Students
                   </button>
                 </div>
-              </div>
+               </div>}
 
-              {orderMode === 'class' && (
+              {!editingFeeOrder && orderMode === 'class' && (
                 <>
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Select Class</label>
-                    <select
-                      {...register('classId')}
-                      disabled={!!watchApplyToAll}
-                      onChange={e => {
-                        if (e.target.value) setValue('applyToAll', false);
-                        register('classId').onChange(e);
-                      }}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#16a34a] disabled:bg-gray-100 disabled:text-gray-400"
-                    >
-                      <option value="">Select a class…</option>
-                      {classes.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-                    </select>
+                    <div className="flex items-center justify-between mb-2">
+                      <label className="block text-sm font-medium text-gray-700">Select Classes</label>
+                      {selectedClassIds.length > 0 && (
+                        <span className="text-xs font-medium text-[#16a34a]">
+                          {selectedClassIds.length} selected
+                        </span>
+                      )}
+                    </div>
+                    <div className={`grid grid-cols-1 sm:grid-cols-2 gap-2 rounded-lg border p-2 max-h-52 overflow-y-auto ${
+                      watchApplyToAll ? 'border-gray-200 bg-gray-50 opacity-60' : 'border-gray-300 bg-white'
+                    }`}>
+                      {classes.map(c => {
+                        const isSelected = selectedClassIds.includes(c.id);
+                        return (
+                          <label
+                            key={c.id}
+                            className={`flex items-center gap-3 rounded-md border px-3 py-2.5 text-sm transition-colors ${
+                              watchApplyToAll
+                                ? 'cursor-not-allowed border-transparent text-gray-400'
+                                : isSelected
+                                  ? 'cursor-pointer border-green-200 bg-green-50 text-green-800'
+                                  : 'cursor-pointer border-transparent text-gray-700 hover:border-gray-200 hover:bg-gray-50'
+                            }`}
+                          >
+                            <input
+                              type="checkbox"
+                              value={c.id}
+                              checked={isSelected}
+                              disabled={!!watchApplyToAll}
+                              onChange={e => {
+                                const nextIds = e.target.checked
+                                  ? [...selectedClassIds, c.id]
+                                  : selectedClassIds.filter(id => id !== c.id);
+                                setSelectedClassIds(nextIds);
+                                setValue('classIds', nextIds);
+                                if (nextIds.length > 0) setValue('applyToAll', false);
+                              }}
+                              className="h-4 w-4 rounded border-gray-300 accent-[#16a34a] focus:ring-[#16a34a]"
+                            />
+                            <span className="font-medium">{c.name}</span>
+                          </label>
+                        );
+                      })}
+                    </div>
+                    <p className="text-xs text-gray-400 mt-1">Select one or more classes for this fee order.</p>
                   </div>
                   <div className="flex items-center gap-2">
                     <input
@@ -897,7 +1143,10 @@ export default function FinancePage() {
                       id="applyToAll"
                       {...register('applyToAll')}
                       onChange={e => {
-                        if (e.target.checked) setValue('classId', '');
+                         if (e.target.checked) {
+                           setSelectedClassIds([]);
+                           setValue('classIds', []);
+                         }
                         register('applyToAll').onChange(e);
                       }}
                       className="w-4 h-4 accent-[#16a34a]"
@@ -907,7 +1156,7 @@ export default function FinancePage() {
                 </>
               )}
 
-              {orderMode === 'individual' && (
+              {!editingFeeOrder && orderMode === 'individual' && (
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Search & Select Students</label>
                   <div className="relative">
@@ -959,15 +1208,15 @@ export default function FinancePage() {
                 </div>
               )}
 
-              <div className="flex gap-3 justify-end">
-                <button type="button" onClick={() => setShowFeeOrderModal(false)} className="px-4 py-2 text-sm text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50">Cancel</button>
+              <div className="mobile-modal-actions flex gap-3 justify-end">
+                <button type="button" onClick={() => { setShowFeeOrderModal(false); setEditingFeeOrder(null); }} className="px-4 py-2 text-sm text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50">Cancel</button>
                 <button
                   type="submit"
-                  disabled={feeSubmitting || (orderMode === 'individual' && selectedStudents.length === 0)}
+                  disabled={feeSubmitting || (!editingFeeOrder && orderMode === 'individual' && selectedStudents.length === 0)}
                   className="px-4 py-2 text-sm text-white bg-[#16a34a] hover:bg-green-700 rounded-lg disabled:opacity-60 flex items-center gap-2"
                 >
                   {feeSubmitting && <Loader2 className="w-4 h-4 animate-spin" />}
-                  Create
+                  {editingFeeOrder ? 'Update' : 'Create'}
                 </button>
               </div>
             </form>
@@ -989,8 +1238,22 @@ export default function FinancePage() {
           isOpen={printModal.open}
           onClose={() => setPrintModal({ open: false, invoice: null })}
           invoice={printModal.invoice}
+           payment={printModal.payment}
         />
       )}
+
+      <ConfirmModal
+        isOpen={!!deleteTarget}
+        title="Delete fee order?"
+        message={deleteTarget
+          ? `This will permanently delete “${deleteTarget.title}” and its unpaid invoices. Orders with any payment cannot be deleted.`
+          : ''}
+        onConfirm={deleteFeeOrder}
+        onCancel={() => setDeleteTarget(null)}
+        confirmLabel="Delete order"
+        confirmClassName="bg-red-600 hover:bg-red-700"
+        isLoading={deleteSubmitting}
+      />
     </div>
   );
 }

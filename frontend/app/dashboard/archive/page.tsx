@@ -1,9 +1,10 @@
 'use client';
 import { useEffect, useState, useCallback } from 'react';
-import { RotateCcw, Loader2 } from 'lucide-react';
+import { RotateCcw, Loader2, Trash2 } from 'lucide-react';
 import api from '@/lib/api';
 import { formatDate } from '@/lib/utils';
 import InitialsAvatar from '@/components/InitialsAvatar';
+import ConfirmModal from '@/components/ConfirmModal';
 
 type ArchiveTab = 'students' | 'teachers' | 'attendance';
 
@@ -44,6 +45,12 @@ export default function ArchivePage() {
   const [closedTerms, setClosedTerms] = useState<ClosedTermSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [restoringId, setRestoringId] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<{
+    type: 'student' | 'teacher';
+    id: string;
+    name: string;
+  } | null>(null);
 
   const fetchArchive = useCallback(async () => {
     setLoading(true);
@@ -102,6 +109,25 @@ export default function ArchivePage() {
     }
   };
 
+  const deleteArchivedRecord = async () => {
+    if (!deleteTarget) return;
+
+    setDeletingId(deleteTarget.id);
+    try {
+      await api.delete(`/archive/${deleteTarget.type}s/${deleteTarget.id}`);
+      if (deleteTarget.type === 'student') {
+        setArchivedStudents(prev => prev.filter(student => student.id !== deleteTarget.id));
+      } else {
+        setArchivedTeachers(prev => prev.filter(teacher => teacher.id !== deleteTarget.id));
+      }
+      setDeleteTarget(null);
+    } catch {
+      // Keep the record visible if permanent deletion fails.
+    } finally {
+      setDeletingId(null);
+    }
+  };
+
 
 
   return (
@@ -113,7 +139,7 @@ export default function ArchivePage() {
 
       {/* Tabs */}
       <div className="border-b border-gray-200 mb-6">
-        <div className="flex gap-0">
+        <div className="mobile-tabs flex gap-0">
           {([
             { key: 'students' as const, label: 'Archived Students' },
             { key: 'teachers' as const, label: 'Archived Teachers' },
@@ -170,19 +196,33 @@ export default function ArchivePage() {
                         <td className="px-4 py-3 text-gray-600">{s.class?.name || '—'}</td>
                         <td className="px-4 py-3 text-gray-500">{s.archivedAt ? formatDate(s.archivedAt) : '—'}</td>
                         <td className="px-4 py-3 text-gray-500 max-w-xs truncate">{s.archiveReason || '—'}</td>
-                        <td className="px-4 py-3">
-                          <button
-                            onClick={() => restoreStudent(s.id)}
-                            disabled={restoringId === s.id}
-                            className="flex items-center gap-1.5 text-xs text-[#16a34a] hover:text-green-700 font-medium"
-                          >
-                            {restoringId === s.id ? (
-                              <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                            ) : (
-                              <RotateCcw className="w-3.5 h-3.5" />
-                            )}
-                            Restore
-                          </button>
+                         <td className="px-4 py-3">
+                           <div className="flex items-center gap-3">
+                             <button
+                               onClick={() => restoreStudent(s.id)}
+                               disabled={restoringId === s.id || deletingId === s.id}
+                               className="flex items-center gap-1.5 text-xs text-[#16a34a] hover:text-green-700 font-medium"
+                             >
+                               {restoringId === s.id ? (
+                                 <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                               ) : (
+                                 <RotateCcw className="w-3.5 h-3.5" />
+                               )}
+                               Restore
+                             </button>
+                             <button
+                               onClick={() => setDeleteTarget({
+                                 type: 'student',
+                                 id: s.id,
+                                 name: `${s.firstName} ${s.lastName}`,
+                               })}
+                               disabled={restoringId === s.id || deletingId === s.id}
+                               className="flex items-center gap-1.5 text-xs text-red-600 hover:text-red-700 font-medium"
+                             >
+                               {deletingId === s.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
+                               Delete Forever
+                             </button>
+                           </div>
                         </td>
                       </tr>
                     ))
@@ -222,19 +262,33 @@ export default function ArchivePage() {
                         <td className="px-4 py-3 text-gray-600">{t.class?.name || '—'}</td>
                         <td className="px-4 py-3 text-gray-500">{t.archivedAt ? formatDate(t.archivedAt) : '—'}</td>
                         <td className="px-4 py-3 text-gray-500 max-w-xs truncate">{t.archiveReason || '—'}</td>
-                        <td className="px-4 py-3">
-                          <button
-                            onClick={() => restoreTeacher(t.id)}
-                            disabled={restoringId === t.id}
-                            className="flex items-center gap-1.5 text-xs text-[#16a34a] hover:text-green-700 font-medium"
-                          >
-                            {restoringId === t.id ? (
-                              <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                            ) : (
-                              <RotateCcw className="w-3.5 h-3.5" />
-                            )}
-                            Restore
-                          </button>
+                         <td className="px-4 py-3">
+                           <div className="flex items-center gap-3">
+                             <button
+                               onClick={() => restoreTeacher(t.id)}
+                               disabled={restoringId === t.id || deletingId === t.id}
+                               className="flex items-center gap-1.5 text-xs text-[#16a34a] hover:text-green-700 font-medium"
+                             >
+                               {restoringId === t.id ? (
+                                 <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                               ) : (
+                                 <RotateCcw className="w-3.5 h-3.5" />
+                               )}
+                               Restore
+                             </button>
+                             <button
+                               onClick={() => setDeleteTarget({
+                                 type: 'teacher',
+                                 id: t.id,
+                                 name: t.user.name,
+                               })}
+                               disabled={restoringId === t.id || deletingId === t.id}
+                               className="flex items-center gap-1.5 text-xs text-red-600 hover:text-red-700 font-medium"
+                             >
+                               {deletingId === t.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
+                               Delete Forever
+                             </button>
+                           </div>
                         </td>
                       </tr>
                     ))
@@ -293,6 +347,19 @@ export default function ArchivePage() {
           )}
         </>
       )}
+
+      <ConfirmModal
+        isOpen={!!deleteTarget}
+        title="Delete permanently?"
+        message={deleteTarget
+          ? `This will permanently delete ${deleteTarget.name} and all of their archived records. This action cannot be undone.`
+          : ''}
+        onConfirm={deleteArchivedRecord}
+        onCancel={() => setDeleteTarget(null)}
+        confirmLabel="Delete Forever"
+        confirmClassName="bg-red-600 hover:bg-red-700"
+        isLoading={!!deletingId}
+      />
     </div>
   );
 }

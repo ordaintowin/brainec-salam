@@ -15,20 +15,27 @@ async function bootstrap() {
   );
 
   app.enableCors({
-    // Important: Ensure this URL in Vercel settings has NO trailing slash
-    origin: process.env.FRONTEND_URL || 'https://brainecs-salam.vercel.app',
+    origin: process.env.FRONTEND_URL || true,
     credentials: true,
   });
 
-  // Local development logic
-  if (process.env.NODE_ENV !== 'production') {
-    const port = process.env.PORT || 5000;
-    await app.listen(port);
-    console.log(`Application is running on: http://localhost:${port}`);
+  // Local development and the Replit workflow run Nest as a normal HTTP
+  // service. Vercel still uses the exported handler below.
+  if (process.env.NODE_ENV !== 'production' || !process.env.VERCEL) {
+    const port = Number(process.env.PORT || 5001);
+    await app.listen(port, '0.0.0.0');
+    console.log(`Application is running on port ${port}`);
+  } else {
+    await app.init();
   }
-
-  await app.init(); // Initialize the app but don't call listen() for Vercel
   return app;
+}
+
+if (!process.env.VERCEL) {
+  bootstrap().catch((error) => {
+    console.error('Failed to start application:', error);
+    process.exit(1);
+  });
 }
 
 // Handler for Vercel Serverless environment

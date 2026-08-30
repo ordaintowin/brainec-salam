@@ -157,7 +157,7 @@ export default function RecordPaymentModal({
             />
           </div>
 
-          <div className="flex gap-3 justify-end pt-2">
+          <div className="mobile-modal-actions flex gap-3 justify-end pt-2">
             <button
               type="button"
               onClick={handleClose}
