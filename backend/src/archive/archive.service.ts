@@ -1,12 +1,17 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { FLOAT_EPSILON, getInvoiceLedger } from '../finance/invoice-ledger';
+import { FinanceReconciliationService } from '../finance/finance-reconciliation.service';
 
 @Injectable()
 export class ArchiveService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private reconciliation: FinanceReconciliationService,
+  ) {}
 
   async getArchivedStudents(page = 1, limit = 10) {
+    await this.reconciliation.reconcile();
     const skip = (page - 1) * limit;
     const [data, total] = await Promise.all([
       this.prisma.student.findMany({

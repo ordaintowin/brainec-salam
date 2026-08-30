@@ -8,10 +8,14 @@ import {
   InvoiceLedger,
   InvoiceLedgerInput,
 } from './invoice-ledger';
+import { FinanceReconciliationService } from './finance-reconciliation.service';
 
 @Injectable()
 export class FinanceService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private reconciliation: FinanceReconciliationService,
+  ) {}
 
   private getInvoiceLedger(invoice: InvoiceLedgerInput, now = new Date()): InvoiceLedger {
     return getInvoiceLedger(invoice, now);
@@ -23,42 +27,7 @@ export class FinanceService {
    * avoids showing an order whose remaining invoices are already settled.
    */
   private async reconcileOpenFeeOrders(): Promise<void> {
-    const orders = await this.prisma.feeOrder.findMany({
-      where: { isArchived: false } as any,
-      select: {
-        id: true,
-        _count: { select: { invoices: true } },
-        invoices: {
-          where: {
-            student: { isArchived: false },
-            isArchivedDebt: false,
-            debtCancelledAt: null,
-          },
-          select: {
-            amountDue: true,
-            amountPaid: true,
-            balance: true,
-            dueDate: true,
-            payments: { select: { amount: true } },
-          },
-        },
-      },
-    });
-
-    const orderIdsToArchive = orders
-      .filter((order) => {
-        if (order._count.invoices === 0) return false;
-        if (order.invoices.length === 0) return true;
-        return order.invoices.every((invoice) => this.getInvoiceLedger(invoice).balance <= FLOAT_EPSILON);
-      })
-      .map((order) => order.id);
-
-    if (orderIdsToArchive.length > 0) {
-      await this.prisma.feeOrder.updateMany({
-        where: { id: { in: orderIdsToArchive }, isArchived: false } as any,
-        data: { isArchived: true, archivedAt: new Date() } as any,
-      });
-    }
+    await this.reconciliation.reconcile();
   }
 
   async createFeeOrder(dto: CreateFeeOrderDto, createdById: string) {
@@ -184,7 +153,6 @@ export class FinanceService {
           invoices: {
             where: {
               student: { isArchived: false },
-              isArchivedDebt: false,
               debtCancelledAt: null,
             },
             select: {
@@ -330,11 +298,11 @@ export class FinanceService {
   }
 
   async getInvoices(page = 1, limit = 10, q?: string) {
+    await this.reconciliation.reconcile();
     const skip = (page - 1) * limit;
     const where: any = {
       student: { isArchived: false },
       feeOrder: { isArchived: false },
-      isArchivedDebt: false,
       debtCancelledAt: null,
     };
 
@@ -390,6 +358,7 @@ export class FinanceService {
   }
 
   async getStudentInvoices(studentId: string) {
+    await this.reconciliation.reconcile();
     const student = await this.prisma.student.findUnique({
       where: { id: studentId },
     });
@@ -493,7 +462,6 @@ export class FinanceService {
       where: {
         feeOrderId: invoice.feeOrderId,
         student: { isArchived: false },
-        isArchivedDebt: false,
         debtCancelledAt: null,
       },
       select: {
@@ -531,7 +499,6 @@ export class FinanceService {
       where: {
         feeOrderId,
         student: { isArchived: false },
-        isArchivedDebt: false,
         debtCancelledAt: null,
       },
       select: {
@@ -755,6 +722,7 @@ export class FinanceService {
   }
 
   async getFeeOrderSummary(feeOrderId: string) {
+    await this.reconciliation.reconcile();
     const feeOrder = await this.prisma.feeOrder.findUnique({
       where: { id: feeOrderId },
       include: {
@@ -770,7 +738,6 @@ export class FinanceService {
     const invoices = await this.prisma.feeInvoice.findMany({
       where: {
         feeOrderId,
-        isArchivedDebt: false,
         debtCancelledAt: null,
       },
       include: {
@@ -871,13 +838,12 @@ export class FinanceService {
   }
 
   async getSummary() {
-    await this.reconcileOpenFeeOrders();
+    await this.reconciliation.reconcile();
     const [invoices, classes, feeOrders] = await Promise.all([
       this.prisma.feeInvoice.findMany({
         where: {
           feeOrder: { isArchived: false } as any,
           student: { isArchived: false },
-          isArchivedDebt: false,
           debtCancelledAt: null,
         },
         select: {
@@ -1059,6 +1025,7 @@ export class FinanceService {
   }
 
   async getArchivedFeeOrders(page = 1, limit = 10, q?: string) {
+    await this.reconciliation.reconcile();
     const skip = (page - 1) * limit;
     const where: any = { isArchived: true };
 

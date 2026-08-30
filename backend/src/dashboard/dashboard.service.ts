@@ -1,12 +1,17 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { getInvoiceLedger } from '../finance/invoice-ledger';
+import { FinanceReconciliationService } from '../finance/finance-reconciliation.service';
 
 @Injectable()
 export class DashboardService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private reconciliation: FinanceReconciliationService,
+  ) {}
 
   async getStats() {
+    await this.reconciliation.reconcile();
     const today = new Date();
     today.setUTCHours(0, 0, 0, 0);
 
@@ -25,7 +30,6 @@ export class DashboardService {
         where: {
           student: { isArchived: false },
           feeOrder: { isArchived: false } as any,
-          isArchivedDebt: false,
           debtCancelledAt: null,
         },
         select: {
