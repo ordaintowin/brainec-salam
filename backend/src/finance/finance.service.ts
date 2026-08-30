@@ -778,11 +778,13 @@ export class FinanceService {
     }[] = [];
 
     const visibleInvoices = invoices.filter((inv) => {
+      // Active fee orders are operational views: only current students with
+      // an unpaid invoice belong here. Paid invoices and archived students
+      // remain available through finance history/archive views instead.
+      if (inv.student.isArchived) return false;
+
       const ledger = this.getInvoiceLedger(inv);
-      // Archived orders retain paid students for historical reporting, but
-      // outstanding archived-student debt belongs on the student profile.
-      return !inv.student.isArchived
-        || (feeOrder.isArchived && ledger.balance <= FLOAT_EPSILON);
+      return feeOrder.isArchived || ledger.balance > FLOAT_EPSILON;
     });
 
     for (const inv of visibleInvoices) {

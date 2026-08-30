@@ -947,7 +947,7 @@ export default function FinancePage() {
           <div className="mb-4 flex items-center justify-between">
             <div>
               <h2 className="text-base font-semibold text-gray-800">Archived Fee Orders</h2>
-              <p className="text-sm text-gray-400 mt-0.5">Orders where all students have fully paid. Excluded from dashboard totals.</p>
+              <p className="text-sm text-gray-400 mt-0.5">Settled orders and orders with no current enrolled invoices. Excluded from dashboard totals.</p>
             </div>
           </div>
           <div className="mb-4 max-w-sm">
