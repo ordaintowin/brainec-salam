@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { getInvoiceLedger } from '../finance/invoice-ledger';
 
 @Injectable()
 export class DashboardService {
@@ -13,16 +14,27 @@ export class DashboardService {
       totalStudents,
       totalTeachers,
       totalClasses,
-      invoices,
+      financeInvoices,
       attendanceToday,
       studentsToday,
-      paymentBreakdown,
     ] = await Promise.all([
       this.prisma.student.count({ where: { isArchived: false } }),
       this.prisma.teacher.count({ where: { isArchived: false } }),
       this.prisma.class.count(),
-      this.prisma.feeInvoice.aggregate({
-        _sum: { amountPaid: true, balance: true },
+      this.prisma.feeInvoice.findMany({
+        where: {
+          student: { isArchived: false },
+          feeOrder: { isArchived: false } as any,
+          isArchivedDebt: false,
+          debtCancelledAt: null,
+        },
+        select: {
+          amountDue: true,
+          amountPaid: true,
+          balance: true,
+          dueDate: true,
+          payments: { select: { amount: true } },
+        },
       }),
       this.prisma.attendance.count({
         where: { date: today, status: 'PRESENT' },
@@ -30,14 +42,16 @@ export class DashboardService {
       this.prisma.attendance.count({
         where: { date: today },
       }),
-      this.prisma.feeInvoice.groupBy({
-        by: ['status'],
-        _count: { status: true },
-      }),
     ]);
 
-    const totalCollected = Number(invoices._sum.amountPaid ?? 0);
-    const totalOutstanding = Number(invoices._sum.balance ?? 0);
+    const ledgers = financeInvoices.map((invoice) => getInvoiceLedger(invoice));
+
+    const totalCollected = ledgers.reduce((sum, invoice) => sum + invoice.amountPaid, 0);
+    const totalOutstanding = ledgers.reduce((sum, invoice) => sum + invoice.balance, 0);
+    const paymentBreakdown = Array.from(new Set(ledgers.map((invoice) => invoice.status))).map((status) => ({
+      status,
+      count: ledgers.filter((invoice) => invoice.status === status).length,
+    }));
     const todayAttendancePercent =
       studentsToday > 0 ? (attendanceToday / studentsToday) * 100 : 0;
 
@@ -50,7 +64,7 @@ export class DashboardService {
       todayAttendancePercent,
       paymentBreakdown: paymentBreakdown.map((p) => ({
         status: p.status,
-        count: p._count.status,
+        count: p.count,
       })),
     };
   }

@@ -2,13 +2,64 @@ import { Injectable, NotFoundException, BadRequestException } from '@nestjs/comm
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateFeeOrderDto, UpdateFeeOrderDto, RecordPaymentDto, BulkPaymentDto, FeeOrderType } from './dto/finance.dto';
 import { PaymentStatus } from '@prisma/client';
-
-/** Tolerance used when comparing floating-point amounts to avoid false overpayment errors */
-const FLOAT_EPSILON = 0.001;
+import {
+  FLOAT_EPSILON,
+  getInvoiceLedger,
+  InvoiceLedger,
+  InvoiceLedgerInput,
+} from './invoice-ledger';
 
 @Injectable()
 export class FinanceService {
   constructor(private prisma: PrismaService) {}
+
+  private getInvoiceLedger(invoice: InvoiceLedgerInput, now = new Date()): InvoiceLedger {
+    return getInvoiceLedger(invoice, now);
+  }
+
+  /**
+   * Reconcile the fee-order archive flag from the same active invoice ledger
+   * used by reports. This repairs old orders lazily when finance is opened and
+   * avoids showing an order whose remaining invoices are already settled.
+   */
+  private async reconcileOpenFeeOrders(): Promise<void> {
+    const orders = await this.prisma.feeOrder.findMany({
+      where: { isArchived: false } as any,
+      select: {
+        id: true,
+        _count: { select: { invoices: true } },
+        invoices: {
+          where: {
+            student: { isArchived: false },
+            isArchivedDebt: false,
+            debtCancelledAt: null,
+          },
+          select: {
+            amountDue: true,
+            amountPaid: true,
+            balance: true,
+            dueDate: true,
+            payments: { select: { amount: true } },
+          },
+        },
+      },
+    });
+
+    const orderIdsToArchive = orders
+      .filter((order) => {
+        if (order._count.invoices === 0) return false;
+        if (order.invoices.length === 0) return true;
+        return order.invoices.every((invoice) => this.getInvoiceLedger(invoice).balance <= FLOAT_EPSILON);
+      })
+      .map((order) => order.id);
+
+    if (orderIdsToArchive.length > 0) {
+      await this.prisma.feeOrder.updateMany({
+        where: { id: { in: orderIdsToArchive }, isArchived: false } as any,
+        data: { isArchived: true, archivedAt: new Date() } as any,
+      });
+    }
+  }
 
   async createFeeOrder(dto: CreateFeeOrderDto, createdById: string) {
     const selectedClassIds = Array.from(new Set(
@@ -104,6 +155,7 @@ export class FinanceService {
   }
 
   async getFeeOrders(page = 1, limit = 10, q?: string) {
+    await this.reconcileOpenFeeOrders();
     const skip = (page - 1) * limit;
     const where: any = { isArchived: false };
 
@@ -136,9 +188,11 @@ export class FinanceService {
               debtCancelledAt: null,
             },
             select: {
+              amountDue: true,
               amountPaid: true,
               balance: true,
-              payments: { select: { id: true } },
+              dueDate: true,
+              payments: { select: { amount: true } },
             },
           },
           _count: { select: { invoices: true } },
@@ -147,15 +201,22 @@ export class FinanceService {
       this.prisma.feeOrder.count({ where }),
     ]);
 
-    const data = rawData.map(({ invoices, feeOrderClasses, ...feeOrder }) => ({
-      ...feeOrder,
-      classes: feeOrderClasses.map((entry) => entry.class),
-      // The fee-order list shows invoices that are still outstanding.
-      // Paid invoices remain available through the payment report/history.
-      _count: { invoices: invoices.filter((invoice) => Number(invoice.balance) > FLOAT_EPSILON).length },
-      totalPaid: invoices.reduce((sum, invoice) => sum + Number(invoice.amountPaid), 0),
-      canDelete: invoices.every((invoice) => Number(invoice.amountPaid) <= FLOAT_EPSILON && invoice.payments.length === 0),
-    }));
+    const data = rawData.map(({ invoices, feeOrderClasses, ...feeOrder }) => {
+      const ledgers = invoices.map((invoice) => this.getInvoiceLedger({
+        ...invoice,
+        payments: invoice.payments,
+      }));
+
+      return {
+        ...feeOrder,
+        classes: feeOrderClasses.map((entry) => entry.class),
+        // The fee-order list shows invoices that are still outstanding.
+        // Paid invoices remain available through the payment report/history.
+        _count: { invoices: ledgers.filter((invoice) => invoice.balance > FLOAT_EPSILON).length },
+        totalPaid: ledgers.reduce((sum, invoice) => sum + invoice.amountPaid, 0),
+        canDelete: ledgers.every((invoice) => invoice.amountPaid <= FLOAT_EPSILON),
+      };
+    });
 
     return {
       data,
@@ -170,7 +231,11 @@ export class FinanceService {
         invoices: {
           select: {
             studentId: true,
+            amountDue: true,
             amountPaid: true,
+            balance: true,
+            dueDate: true,
+            payments: { select: { amount: true } },
           },
         },
       },
@@ -185,7 +250,7 @@ export class FinanceService {
     const dueDate = dto.dueDate ? new Date(dto.dueDate) : feeOrder.dueDate;
 
     for (const invoice of feeOrder.invoices) {
-      if (amount + FLOAT_EPSILON < Number(invoice.amountPaid)) {
+      if (amount + FLOAT_EPSILON < this.getInvoiceLedger(invoice).amountPaid) {
         throw new BadRequestException('The order amount cannot be less than an amount already paid');
       }
     }
@@ -207,7 +272,7 @@ export class FinanceService {
       });
 
       for (const invoice of feeOrder.invoices) {
-        const amountPaid = Number(invoice.amountPaid);
+        const amountPaid = this.getInvoiceLedger(invoice).amountPaid;
         const balance = Math.max(0, amount - amountPaid);
         await tx.feeInvoice.updateMany({
           where: { feeOrderId, studentId: invoice.studentId },
@@ -269,7 +334,6 @@ export class FinanceService {
     const where: any = {
       student: { isArchived: false },
       feeOrder: { isArchived: false },
-      balance: { gt: 0 },
       isArchivedDebt: false,
       debtCancelledAt: null,
     };
@@ -282,33 +346,46 @@ export class FinanceService {
       ];
     }
 
-    const [data, total] = await Promise.all([
-      this.prisma.feeInvoice.findMany({
-        where,
-        skip,
-        take: limit,
-        orderBy: { createdAt: 'desc' },
-        include: {
-          student: {
-            select: {
-              id: true,
-              studentId: true,
-              firstName: true,
-              lastName: true,
-              class: { select: { id: true, name: true } },
-            },
-          },
-          feeOrder: {
-            select: { id: true, title: true, amount: true, dueDate: true },
+    const invoices = await this.prisma.feeInvoice.findMany({
+      where,
+      orderBy: { createdAt: 'desc' },
+      include: {
+        student: {
+          select: {
+            id: true,
+            studentId: true,
+            firstName: true,
+            lastName: true,
+            class: { select: { id: true, name: true } },
           },
         },
-      }),
-      this.prisma.feeInvoice.count({ where }),
-    ]);
+        feeOrder: {
+          select: { id: true, title: true, amount: true, dueDate: true },
+        },
+        payments: { select: { amount: true } },
+      },
+    });
+
+    const outstandingInvoices = invoices
+      .map((invoice) => {
+        const ledger = this.getInvoiceLedger(invoice);
+        return {
+          ...invoice,
+          amountPaid: ledger.amountPaid,
+          balance: ledger.balance,
+          status: ledger.status,
+        };
+      })
+      .filter((invoice) => invoice.balance > FLOAT_EPSILON);
 
     return {
-      data,
-      meta: { total, page, limit, totalPages: Math.ceil(total / limit) },
+      data: outstandingInvoices.slice(skip, skip + limit),
+      meta: {
+        total: outstandingInvoices.length,
+        page,
+        limit,
+        totalPages: Math.ceil(outstandingInvoices.length / limit),
+      },
     };
   }
 
@@ -321,7 +398,6 @@ export class FinanceService {
     const invoices = await this.prisma.feeInvoice.findMany({
       where: {
         studentId,
-        balance: { gt: 0 },
         debtCancelledAt: null,
       },
       orderBy: { createdAt: 'desc' },
@@ -331,18 +407,24 @@ export class FinanceService {
       },
     });
 
-    return invoices.map((inv) => ({
-      ...inv,
-      creditBalance: this.computeCreditBalance(
-        Number(inv.amountPaid),
-        Number(inv.amountDue),
-      ),
-    }));
+    return invoices
+      .map((inv) => {
+        const ledger = this.getInvoiceLedger(inv);
+        return {
+          ...inv,
+          amountPaid: ledger.amountPaid,
+          balance: ledger.balance,
+          status: ledger.status,
+          creditBalance: this.computeCreditBalance(ledger.amountPaid, ledger.amountDue),
+        };
+      })
+      .filter((invoice) => invoice.balance > FLOAT_EPSILON);
   }
 
   async recordPayment(dto: RecordPaymentDto, recordedById: string) {
     const invoice = await this.prisma.feeInvoice.findUnique({
       where: { id: dto.invoiceId },
+      include: { payments: { select: { amount: true } } },
     });
     if (!invoice) throw new NotFoundException('Invoice not found');
     if (invoice.studentId !== dto.studentId) {
@@ -350,9 +432,9 @@ export class FinanceService {
     }
 
     const amountNum = Number(dto.amount);
-    const currentPaid = Number(invoice.amountPaid);
     const amountDue = Number(invoice.amountDue);
-    const currentBalance = amountDue - currentPaid;
+    const currentPaid = this.getInvoiceLedger(invoice).amountPaid;
+    const currentBalance = Math.max(0, amountDue - currentPaid);
 
     if (amountNum <= 0) {
       throw new BadRequestException('Payment amount must be positive');
@@ -414,7 +496,13 @@ export class FinanceService {
         isArchivedDebt: false,
         debtCancelledAt: null,
       },
-      select: { status: true, balance: true, amountPaid: true },
+      select: {
+        amountDue: true,
+        amountPaid: true,
+        balance: true,
+        dueDate: true,
+        payments: { select: { amount: true } },
+      },
     });
 
     // Archived students' invoices are no longer linked to the order. If no
@@ -433,9 +521,7 @@ export class FinanceService {
       return;
     }
 
-    const allPaid = allInvoices.every((inv) =>
-      this.isEffectivelyPaid(inv.status, Number(inv.balance), Number(inv.amountPaid)),
-    );
+    const allPaid = allInvoices.every((inv) => this.getInvoiceLedger(inv).balance <= FLOAT_EPSILON);
 
     if (allPaid) await this.checkAndArchiveFeeOrderById(invoice.feeOrderId);
   }
@@ -448,7 +534,13 @@ export class FinanceService {
         isArchivedDebt: false,
         debtCancelledAt: null,
       },
-      select: { status: true, balance: true, amountPaid: true },
+      select: {
+        amountDue: true,
+        amountPaid: true,
+        balance: true,
+        dueDate: true,
+        payments: { select: { amount: true } },
+      },
     });
 
     // A removed student's invoice is intentionally no longer part of this
@@ -467,9 +559,7 @@ export class FinanceService {
       return;
     }
 
-    const allPaid = allInvoices.every((inv) =>
-      this.isEffectivelyPaid(inv.status, Number(inv.balance), Number(inv.amountPaid)),
-    );
+    const allPaid = allInvoices.every((inv) => this.getInvoiceLedger(inv).balance <= FLOAT_EPSILON);
 
     if (allPaid) {
       await this.prisma.feeOrder.update({
@@ -488,6 +578,7 @@ export class FinanceService {
     const invoices = await this.prisma.feeInvoice.findMany({
       where: { id: { in: dto.invoiceIds }, studentId: dto.studentId },
       orderBy: { dueDate: 'asc' },
+      include: { payments: { select: { amount: true } } },
     });
 
     if (invoices.length !== dto.invoiceIds.length) {
@@ -495,7 +586,10 @@ export class FinanceService {
     }
 
     // Compute total outstanding across all selected invoices
-    const totalOutstanding = invoices.reduce((sum, inv) => sum + Number(inv.balance), 0);
+    const totalOutstanding = invoices.reduce(
+      (sum, inv) => sum + this.getInvoiceLedger(inv).balance,
+      0,
+    );
 
     if (dto.amount <= 0) {
       throw new BadRequestException('Payment amount must be positive');
@@ -514,16 +608,16 @@ export class FinanceService {
     for (const inv of invoices) {
       if (remaining <= 0) break;
 
-      const balance = Number(inv.balance);
+      const ledger = this.getInvoiceLedger(inv);
+      const balance = ledger.balance;
       if (balance <= 0) continue;
 
       const applyAmount = Math.min(remaining, balance);
       // Round to 2 decimal places to prevent floating-point precision drift when distributing across invoices
       remaining = Math.round((remaining - applyAmount) * 100) / 100;
 
-      const currentPaid = Number(inv.amountPaid);
       const amountDue = Number(inv.amountDue);
-      const newPaid = currentPaid + applyAmount;
+      const newPaid = ledger.amountPaid + applyAmount;
       const newBalance = Math.max(0, amountDue - newPaid);
 
       const status: PaymentStatus =
@@ -563,9 +657,9 @@ export class FinanceService {
     return excess > 0 ? excess : 0;
   }
 
-  /** Whether the invoice should be treated as fully paid (status PAID, or zero balance with partial payment) */
-  private isEffectivelyPaid(status: string, balance: number, amountPaid: number): boolean {
-    return status === PaymentStatus.PAID || (balance <= 0 && amountPaid > 0);
+  /** Whether the calculated invoice ledger is fully paid. */
+  private isEffectivelyPaid(_status: string, balance: number, _amountPaid: number): boolean {
+    return balance <= FLOAT_EPSILON;
   }
 
   async getPayments(page = 1, limit = 10, q?: string) {
@@ -635,6 +729,7 @@ export class FinanceService {
       const previousPayments = currentIndex >= 0 ? paymentHistory.slice(0, currentIndex) : [];
       const previousPaid = previousPayments.reduce((sum, entry) => sum + entry.amount, 0);
       const paymentAmount = Number(payment.amount);
+      const ledger = this.getInvoiceLedger(invoice);
 
       return {
         ...payment,
@@ -645,8 +740,9 @@ export class FinanceService {
         invoice: {
           ...invoice,
           amountDue: Number(invoice.amountDue),
-          amountPaid: Number(invoice.amountPaid),
-          balance: Number(invoice.balance),
+          amountPaid: ledger.amountPaid,
+          balance: ledger.balance,
+          status: ledger.status,
           payments: paymentHistory,
         },
       };
@@ -689,6 +785,7 @@ export class FinanceService {
             class: { select: { name: true } },
           },
         },
+        payments: { select: { amount: true } },
       },
     });
 
@@ -713,10 +810,19 @@ export class FinanceService {
       amountPaid: number;
     }[] = [];
 
-    for (const inv of invoices) {
-      const due = Number(inv.amountDue);
-      const paid = Number(inv.amountPaid);
-      const bal = Number(inv.balance);
+    const visibleInvoices = invoices.filter((inv) => {
+      const ledger = this.getInvoiceLedger(inv);
+      // Archived orders retain paid students for historical reporting, but
+      // outstanding archived-student debt belongs on the student profile.
+      return !inv.student.isArchived
+        || (feeOrder.isArchived && ledger.balance <= FLOAT_EPSILON);
+    });
+
+    for (const inv of visibleInvoices) {
+      const ledger = this.getInvoiceLedger(inv);
+      const due = ledger.amountDue;
+      const paid = ledger.amountPaid;
+      const bal = ledger.balance;
 
       totalToCollect += due;
       totalCollected += paid;
@@ -730,7 +836,7 @@ export class FinanceService {
         isArchived: inv.student.isArchived,
       };
 
-      if (this.isEffectivelyPaid(inv.status, bal, paid)) {
+      if (this.isEffectivelyPaid(ledger.status, bal, paid)) {
         paidStudents.push({ ...studentInfo, amountPaid: paid, amountDue: due });
       } else if (bal > 0) {
         owingStudents.push({
@@ -752,7 +858,7 @@ export class FinanceService {
         type: (feeOrder as any).type,
         class: feeOrder.class,
         classes: feeOrder.feeOrderClasses.map((entry) => entry.class),
-        invoiceCount: invoices.filter((inv) => Number(inv.balance) > FLOAT_EPSILON).length,
+        invoiceCount: visibleInvoices.filter((inv) => this.getInvoiceLedger(inv).balance > FLOAT_EPSILON).length,
         isArchived: (feeOrder as any).isArchived,
         archivedAt: (feeOrder as any).archivedAt,
       },
@@ -765,6 +871,7 @@ export class FinanceService {
   }
 
   async getSummary() {
+    await this.reconcileOpenFeeOrders();
     const [invoices, classes, feeOrders] = await Promise.all([
       this.prisma.feeInvoice.findMany({
         where: {
@@ -779,6 +886,8 @@ export class FinanceService {
           balance: true,
           status: true,
           feeOrderId: true,
+          dueDate: true,
+          payments: { select: { amount: true } },
           student: {
             select: {
               id: true,
@@ -850,13 +959,14 @@ export class FinanceService {
     });
 
     for (const inv of invoices) {
-      const paid = Number(inv.amountPaid);
-      const bal = Number(inv.balance);
-      const due = Number(inv.amountDue);
+      const ledger = this.getInvoiceLedger(inv);
+      const paid = ledger.amountPaid;
+      const bal = ledger.balance;
+      const due = ledger.amountDue;
 
       totalCollected += paid;
       totalOutstanding += bal;
-      if (inv.status === PaymentStatus.OVERDUE) totalOverdue += bal;
+      if (ledger.status === PaymentStatus.OVERDUE) totalOverdue += bal;
 
       const cid = inv.student.classId;
       if (classMap[cid]) {
@@ -880,7 +990,7 @@ export class FinanceService {
           className: inv.student.class?.name || '—',
         };
 
-        if (this.isEffectivelyPaid(inv.status, bal, paid)) {
+        if (this.isEffectivelyPaid(ledger.status, bal, paid)) {
           foEntry.paidStudents.push({ ...studentInfo, amountPaid: paid });
         } else if (bal > 0) {
           foEntry.owingStudents.push({ ...studentInfo, balance: bal });
@@ -921,6 +1031,8 @@ export class FinanceService {
         amountDue: true,
         amountPaid: true,
         balance: true,
+        dueDate: true,
+        payments: { select: { amount: true } },
         debtCancelledAt: true,
         isArchivedDebt: true,
       },
@@ -933,7 +1045,7 @@ export class FinanceService {
     if (!invoice.isArchivedDebt) {
       throw new BadRequestException('Only archived student debt can be cancelled');
     }
-    if (Number(invoice.balance) <= FLOAT_EPSILON) {
+    if (this.getInvoiceLedger(invoice).balance <= FLOAT_EPSILON) {
       throw new BadRequestException('This invoice is already fully paid');
     }
 

@@ -1,5 +1,6 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { FLOAT_EPSILON, getInvoiceLedger } from '../finance/invoice-ledger';
 
 @Injectable()
 export class ArchiveService {
@@ -53,10 +54,27 @@ export class ArchiveService {
     if (!student || !student.isArchived) {
       throw new NotFoundException('Archived student not found');
     }
-    await this.prisma.feeInvoice.updateMany({
-      where: { studentId: id, balance: { gt: 0 }, debtCancelledAt: null },
-      data: { isArchivedDebt: true },
+    const invoices = await this.prisma.feeInvoice.findMany({
+      where: { studentId: id, debtCancelledAt: null },
+      select: {
+        id: true,
+        amountDue: true,
+        amountPaid: true,
+        balance: true,
+        dueDate: true,
+        payments: { select: { amount: true } },
+      },
     });
+    const outstandingInvoiceIds = invoices
+      .filter((invoice) => getInvoiceLedger(invoice).balance > FLOAT_EPSILON)
+      .map((invoice) => invoice.id);
+
+    if (outstandingInvoiceIds.length > 0) {
+      await this.prisma.feeInvoice.updateMany({
+        where: { id: { in: outstandingInvoiceIds } },
+        data: { isArchivedDebt: true },
+      });
+    }
     return this.prisma.student.update({
       where: { id },
       data: {

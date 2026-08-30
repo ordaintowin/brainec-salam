@@ -2,6 +2,7 @@ import { Injectable, NotFoundException, ForbiddenException } from '@nestjs/commo
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateStudentDto, UpdateStudentDto } from './dto/student.dto';
 import { CloudinaryService } from '../common/services/cloudinary.service';
+import { FLOAT_EPSILON, getInvoiceLedger } from '../finance/invoice-ledger';
 
 @Injectable()
 export class StudentsService {
@@ -92,10 +93,9 @@ export class StudentsService {
         class: true,
         feeInvoices: {
           where: {
-            balance: { gt: 0 },
             debtCancelledAt: null,
           },
-          include: { feeOrder: true },
+          include: { feeOrder: true, payments: true },
           orderBy: { createdAt: 'desc' },
         },
         attendances: {
@@ -108,7 +108,20 @@ export class StudentsService {
     if (teacherClassId && student.classId !== teacherClassId) {
       throw new ForbiddenException('You can only view students from your assigned class');
     }
-    return student;
+    return {
+      ...student,
+      feeInvoices: student.feeInvoices
+        .map((invoice) => {
+          const ledger = getInvoiceLedger(invoice);
+          return {
+            ...invoice,
+            amountPaid: ledger.amountPaid,
+            balance: ledger.balance,
+            status: ledger.status,
+          };
+        })
+        .filter((invoice) => invoice.balance > FLOAT_EPSILON),
+    };
   }
 
   async update(id: string, dto: UpdateStudentDto) {
@@ -131,15 +144,25 @@ export class StudentsService {
       const outstandingInvoices = await tx.feeInvoice.findMany({
         where: {
           studentId: id,
-          balance: { gt: 0 },
           debtCancelledAt: null,
         },
-        select: { id: true },
+        select: {
+          id: true,
+          amountDue: true,
+          amountPaid: true,
+          balance: true,
+          dueDate: true,
+          payments: { select: { amount: true } },
+        },
       });
 
-      if (outstandingInvoices.length > 0) {
+      const outstandingInvoiceIds = outstandingInvoices
+        .filter((invoice) => getInvoiceLedger(invoice).balance > FLOAT_EPSILON)
+        .map((invoice) => invoice.id);
+
+      if (outstandingInvoiceIds.length > 0) {
         await tx.feeInvoice.updateMany({
-          where: { id: { in: outstandingInvoices.map((invoice) => invoice.id) } },
+          where: { id: { in: outstandingInvoiceIds } },
           data: { isArchivedDebt: true },
         });
       }
@@ -156,7 +179,7 @@ export class StudentsService {
 
       return {
         ...student,
-        archivedDebtInvoices: outstandingInvoices.length,
+        archivedDebtInvoices: outstandingInvoiceIds.length,
       };
     });
 
@@ -178,11 +201,17 @@ export class StudentsService {
           isArchivedDebt: false,
           debtCancelledAt: null,
         },
-        select: { balance: true },
+        select: {
+          amountDue: true,
+          amountPaid: true,
+          balance: true,
+          dueDate: true,
+          payments: { select: { amount: true } },
+        },
       });
 
       const hasOutstandingActiveInvoice = activeInvoices.some(
-        (invoice) => Number(invoice.balance) > 0.001,
+        (invoice) => getInvoiceLedger(invoice).balance > FLOAT_EPSILON,
       );
 
       if (!hasOutstandingActiveInvoice) {
@@ -217,14 +246,27 @@ export class StudentsService {
   async restore(id: string) {
     const student = await this.prisma.student.findUnique({ where: { id } });
     if (!student) throw new NotFoundException('Student not found');
-    await this.prisma.feeInvoice.updateMany({
-      where: {
-        studentId: id,
-        balance: { gt: 0 },
-        debtCancelledAt: null,
+    const invoices = await this.prisma.feeInvoice.findMany({
+      where: { studentId: id, debtCancelledAt: null },
+      select: {
+        id: true,
+        amountDue: true,
+        amountPaid: true,
+        balance: true,
+        dueDate: true,
+        payments: { select: { amount: true } },
       },
-      data: { isArchivedDebt: true },
     });
+    const outstandingInvoiceIds = invoices
+      .filter((invoice) => getInvoiceLedger(invoice).balance > FLOAT_EPSILON)
+      .map((invoice) => invoice.id);
+
+    if (outstandingInvoiceIds.length > 0) {
+      await this.prisma.feeInvoice.updateMany({
+        where: { id: { in: outstandingInvoiceIds } },
+        data: { isArchivedDebt: true },
+      });
+    }
     return this.prisma.student.update({
       where: { id },
       data: {
