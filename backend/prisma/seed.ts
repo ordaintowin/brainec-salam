@@ -31,23 +31,19 @@ async function main() {
     },
   });
 
-  const adminPassword = await bcrypt.hash('admin', 10);
   await prisma.user.upsert({
     where: { email: 'admin@bs.com' },
-    update: {
-      name: 'Admin',
-      password: adminPassword,
-      role: 'ADMIN',
-      isActive: true,
-    },
+    // Never overwrite an existing user's name, password, role, or status
+    // when the application starts or migrations are deployed.
+    update: {},
     create: {
       name: 'Admin',
       email: 'admin@bs.com',
-      password: adminPassword,
+      password: await bcrypt.hash('admin', 10),
       role: 'ADMIN',
     },
   });
-  console.log('✅ Admin user restored');
+  console.log('✅ Admin user ensured without overwriting existing credentials');
   console.log('🎉 Seed complete!');
 }
 

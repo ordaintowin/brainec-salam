@@ -8,7 +8,7 @@ import { GraduationCap, Loader2, Eye, EyeOff } from 'lucide-react';
 import { useAuth } from '@/lib/auth';
 
 const loginSchema = z.object({
-  identifier: z.string().min(1, 'Username is required'),
+  email: z.string().email('Enter a valid email address'),
   password: z.string().min(1, 'Password is required'),
 });
 
@@ -31,7 +31,7 @@ export default function LoginPage() {
     setIsLoading(true);
     setError('');
     try {
-      await login(data.identifier, data.password);
+      await login(data.email, data.password);
       router.push('/dashboard');
     } catch (err: unknown) {
       const message =
@@ -67,17 +67,17 @@ export default function LoginPage() {
           <form onSubmit={handleSubmit(onSubmit)} className="space-y-5">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">
-                Username
+                Email address
               </label>
               <input
-                type="text"
-                autoComplete="username"
-                {...register('identifier')}
+                type="email"
+                autoComplete="email"
+                {...register('email')}
                 className="w-full px-4 py-2.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#16a34a] focus:border-transparent"
-                placeholder="admin"
+                placeholder="name@example.com"
               />
-              {errors.identifier && (
-                <p className="text-red-500 text-xs mt-1">{errors.identifier.message}</p>
+              {errors.email && (
+                <p className="text-red-500 text-xs mt-1">{errors.email.message}</p>
               )}
             </div>
 

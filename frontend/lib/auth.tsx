@@ -16,7 +16,7 @@ export interface AuthUser {
 interface AuthContextType {
   user: AuthUser | null;
   loading: boolean;
-  login: (identifier: string, password: string) => Promise<void>;
+  login: (email: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
   refreshUser: () => Promise<void>;
 }
@@ -40,8 +40,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     refreshUser().finally(() => setLoading(false));
   }, []);
 
-  const login = async (identifier: string, password: string) => {
-    await api.post('/auth/login', { email: identifier, password });
+  const login = async (email: string, password: string) => {
+    await api.post('/auth/login', { email, password });
     await refreshUser();
   };
 
