@@ -1118,6 +1118,8 @@ export default function StudentDetailPage() {
         studentId={student.id}
         studentName={`${student.firstName} ${student.lastName}`}
         studentCode={student.studentId}
+        studentClassName={student.class?.name}
+        guardianName={student.guardianName}
         selectedInvoices={invoices
           .filter(inv => selectedInvoiceIds.has(inv.id) && Number(inv.balance) > 0)
           .map(inv => ({ id: inv.id, feeOrderTitle: inv.feeOrder?.title || '—', balance: Number(inv.balance) }))}

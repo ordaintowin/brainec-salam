@@ -40,6 +40,8 @@ interface BulkPaymentModalProps {
   studentId: string;
   studentName?: string;
   studentCode?: string;
+  studentClassName?: string;
+  guardianName?: string;
   selectedInvoices: SelectedInvoice[];
   onSuccess?: () => void;
 }
@@ -48,10 +50,19 @@ interface SuccessReceiptViewProps {
   receiptData: ReceiptData;
   studentName?: string;
   studentCode?: string;
+  studentClassName?: string;
+  guardianName?: string;
   onClose: () => void;
 }
 
-function SuccessReceiptView({ receiptData, studentName, studentCode, onClose }: SuccessReceiptViewProps) {
+function SuccessReceiptView({
+  receiptData,
+  studentName,
+  studentCode,
+  studentClassName,
+  guardianName,
+  onClose,
+}: SuccessReceiptViewProps) {
   const handlePrint = () => {
     const printWindow = window.open('', '_blank', 'width=800,height=700');
     if (!printWindow) return;
@@ -115,6 +126,8 @@ function SuccessReceiptView({ receiptData, studentName, studentCode, onClose }: 
             <div class="section-title">Student Information</div>
             ${studentName ? `<div class="field"><label>Student Name</label><span>${studentName}</span></div>` : ''}
             ${studentCode ? `<div class="field"><label>Student ID</label><span>${studentCode}</span></div>` : ''}
+            ${studentClassName ? `<div class="field"><label>Class</label><span>${studentClassName}</span></div>` : ''}
+            ${guardianName ? `<div class="field"><label>Parent / Guardian</label><span>${guardianName}</span></div>` : ''}
             <div class="field"><label>Payment Date</label><span>${receiptData.paidAt}</span></div>
           </div>
 
@@ -177,11 +190,13 @@ function SuccessReceiptView({ receiptData, studentName, studentCode, onClose }: 
       <p className="text-sm text-gray-500 mb-5">Receipt No: <span className="font-semibold text-gray-700">{receiptData.receiptNo}</span></p>
 
       <div className="text-left bg-gray-50 rounded-lg p-4 mb-4 space-y-3">
-        {(studentName || studentCode) && (
+        {(studentName || studentCode || studentClassName || guardianName) && (
           <div>
             <p className="text-xs font-medium text-gray-400 uppercase mb-1">Student</p>
             {studentName && <p className="text-sm font-semibold text-gray-800">{studentName}</p>}
             {studentCode && <p className="text-xs text-gray-500">{studentCode}</p>}
+            {studentClassName && <p className="text-xs text-gray-500">Class: {studentClassName}</p>}
+            {guardianName && <p className="text-xs text-gray-500">Parent / Guardian: {guardianName}</p>}
           </div>
         )}
 
@@ -238,6 +253,8 @@ export default function BulkPaymentModal({
   studentId,
   studentName,
   studentCode,
+  studentClassName,
+  guardianName,
   selectedInvoices,
   onSuccess,
 }: BulkPaymentModalProps) {
@@ -309,6 +326,8 @@ export default function BulkPaymentModal({
             receiptData={receiptData}
             studentName={studentName}
             studentCode={studentCode}
+            studentClassName={studentClassName}
+            guardianName={guardianName}
             onClose={handleClose}
           />
         ) : (

@@ -3,14 +3,12 @@ import { PrismaService } from '../prisma/prisma.service';
 import { CreateStudentDto, UpdateStudentDto } from './dto/student.dto';
 import { CloudinaryService } from '../common/services/cloudinary.service';
 import { FLOAT_EPSILON, getInvoiceLedger } from '../finance/invoice-ledger';
-import { FinanceReconciliationService } from '../finance/finance-reconciliation.service';
 
 @Injectable()
 export class StudentsService {
   constructor(
     private prisma: PrismaService,
     private cloudinary: CloudinaryService,
-    private reconciliation: FinanceReconciliationService,
   ) {}
 
   private async generateStudentId(): Promise<string> {
@@ -89,7 +87,6 @@ export class StudentsService {
   }
 
   async findOne(id: string, teacherClassId?: string) {
-    await this.reconciliation.reconcile();
     const student = await this.prisma.student.findUnique({
       where: { id },
       include: {
@@ -201,6 +198,7 @@ export class StudentsService {
         where: {
           feeOrderId,
           student: { isArchived: false },
+          isArchivedDebt: false,
           debtCancelledAt: null,
         },
         select: {

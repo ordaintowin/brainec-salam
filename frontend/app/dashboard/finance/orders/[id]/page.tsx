@@ -121,7 +121,7 @@ export default function FeeOrderDetailPage() {
       {feeOrder.isArchived && (
         <div className="mb-4 flex items-center gap-2 bg-amber-50 border border-amber-200 rounded-lg px-4 py-2.5 text-sm text-amber-700">
           <Archive className="w-4 h-4" />
-          <span>This order is settled or has no current enrolled invoices{feeOrder.archivedAt ? ` · ${formatDate(feeOrder.archivedAt)}` : ''}. It is excluded from dashboard totals.</span>
+          <span>This order is fully paid and archived{feeOrder.archivedAt ? ` · ${formatDate(feeOrder.archivedAt)}` : ''}. It is excluded from dashboard totals.</span>
         </div>
       )}
 
