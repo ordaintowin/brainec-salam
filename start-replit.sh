@@ -3,10 +3,13 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# The imported project stores its connection settings in frontend/.env.
-# Use those only when Replit has not already supplied the variables. The
-# process substitution also handles the file's CRLF line endings.
-if [[ -z "${DATABASE_URL:-}" && -f "$ROOT_DIR/frontend/.env" ]]; then
+# The imported project stores its connection settings in frontend/.env. This
+# project file is the source of truth for the app, Prisma Studio, and
+# migrations. Replit may inject a different DATABASE_URL for the workspace,
+# so load the project settings after the shell environment rather than letting
+# the injected value silently point the app at another database. The process
+# substitution also handles the file's CRLF line endings.
+if [[ -f "$ROOT_DIR/frontend/.env" ]]; then
   set -a
   # shellcheck disable=SC1091
   source <(sed 's/\r$//' "$ROOT_DIR/frontend/.env")
