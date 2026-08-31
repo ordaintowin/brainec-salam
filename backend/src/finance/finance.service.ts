@@ -48,6 +48,12 @@ export class FinanceService {
   private async reconcileOpenFeeOrders(): Promise<void> {
     await this.reconcileArchivedStudentInvoices();
 
+    // Empty orders are not useful history. Remove legacy empty orders before
+    // deciding which populated orders should be archived.
+    await this.prisma.feeOrder.deleteMany({
+      where: { invoices: { none: {} } },
+    } as any);
+
     const orders = await this.prisma.feeOrder.findMany({
       where: { isArchived: false } as any,
       select: {
@@ -72,7 +78,6 @@ export class FinanceService {
 
     const orderIdsToArchive = orders
       .filter((order) => {
-        if (order._count.invoices === 0) return false;
         if (order.invoices.length === 0) return true;
         return order.invoices.every((invoice) => this.getInvoiceLedger(invoice).balance <= FLOAT_EPSILON);
       })
@@ -174,9 +179,17 @@ export class FinanceService {
           dueDate: new Date(dto.dueDate),
         })),
       });
+    } else {
+      // A fee order with no matching active students must not remain as an
+      // empty order or be moved to Archives.
+      await this.prisma.feeOrder.delete({ where: { id: feeOrder.id } });
     }
 
-    return { ...feeOrder, invoicesCreated: students.length };
+    return {
+      ...feeOrder,
+      invoicesCreated: students.length,
+      ...(students.length === 0 ? { deleted: true } : {}),
+    };
   }
 
   async getFeeOrders(page = 1, limit = 10, q?: string) {
@@ -393,7 +406,18 @@ export class FinanceService {
         feeOrder: {
           select: { id: true, title: true, amount: true, dueDate: true },
         },
-        payments: { select: { amount: true } },
+        payments: {
+          orderBy: [{ paidAt: 'asc' }, { id: 'asc' }],
+          select: {
+            id: true,
+            paidAt: true,
+            amount: true,
+            method: true,
+            reference: true,
+            paidBy: true,
+            notes: true,
+          },
+        },
       },
     });
 
@@ -801,6 +825,10 @@ export class FinanceService {
     const invoices = await this.prisma.feeInvoice.findMany({
       where: {
         feeOrderId,
+        // Finance views are school-wide views. Archived students keep their
+        // invoice history on their own profile, but must not contribute to
+        // fee-order details or debtor totals.
+        student: { isArchived: false },
         isArchivedDebt: false,
         debtCancelledAt: null,
       },
@@ -841,13 +869,7 @@ export class FinanceService {
       amountPaid: number;
     }[] = [];
 
-    const visibleInvoices = invoices.filter((inv) => {
-      const ledger = this.getInvoiceLedger(inv);
-      // Archived orders retain paid students for historical reporting, but
-      // outstanding archived-student debt belongs on the student profile.
-      return !inv.student.isArchived
-        || (feeOrder.isArchived && ledger.balance <= FLOAT_EPSILON);
-    });
+    const visibleInvoices = invoices;
 
     for (const inv of visibleInvoices) {
       const ledger = this.getInvoiceLedger(inv);
@@ -1090,6 +1112,12 @@ export class FinanceService {
   }
 
   async getArchivedFeeOrders(page = 1, limit = 10, q?: string) {
+    // Also clean empty archived records when the Archives tab is opened
+    // directly, without relying on another finance endpoint first.
+    await this.prisma.feeOrder.deleteMany({
+      where: { invoices: { none: {} } },
+    } as any);
+
     const skip = (page - 1) * limit;
     const where: any = { isArchived: true };
 

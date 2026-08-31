@@ -48,6 +48,15 @@ interface Invoice {
   balance: number;
   status: string;
   dueDate: string;
+  payments?: {
+    id: string;
+    paidAt?: string;
+    amount: number;
+    method: string;
+    reference?: string;
+    paidBy: string;
+    notes?: string;
+  }[];
 }
 
 interface Payment {

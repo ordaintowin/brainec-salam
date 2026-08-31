@@ -5,7 +5,7 @@ import { formatCurrency, formatDate } from '@/lib/utils';
 
 interface Payment {
   id: string;
-  paidAt: string;
+  paidAt?: string;
   amount: number;
   method: string;
   reference?: string;
@@ -207,7 +207,7 @@ export default function PrintInvoiceModal({ isOpen, onClose, invoice, payment }:
 
               {payment ? (
                 <div>
-                  <div className="amount-row"><span className="amount-label">Payment Date</span><span className="amount-value">{formatDate(payment.paidAt)}</span></div>
+                   <div className="amount-row"><span className="amount-label">Payment Date</span><span className="amount-value">{payment.paidAt ? formatDate(payment.paidAt) : '—'}</span></div>
                   <div className="amount-row"><span className="amount-label">Amount Paid</span><span className="amount-value">{formatCurrency(payment.amount)}</span></div>
                    <div className="amount-row"><span className="amount-label">Previous Payments</span><span className="amount-value">{formatCurrency(amountPaidBefore)}</span></div>
                   <div className="amount-row"><span className="amount-label">Method</span><span className="amount-value">{payment.method.replace('_', ' ')}</span></div>
@@ -268,7 +268,7 @@ export default function PrintInvoiceModal({ isOpen, onClose, invoice, payment }:
                      <tbody>
                        {previousPayments.map(previousPayment => (
                          <tr key={previousPayment.id}>
-                           <td>{formatDate(previousPayment.paidAt)}</td>
+                            <td>{previousPayment.paidAt ? formatDate(previousPayment.paidAt) : '—'}</td>
                            <td>{formatCurrency(previousPayment.amount)}</td>
                            <td>{previousPayment.method.replace('_', ' ')}</td>
                            <td>{previousPayment.paidBy}</td>
@@ -300,7 +300,7 @@ export default function PrintInvoiceModal({ isOpen, onClose, invoice, payment }:
                   <tbody>
                     {invoice.payments.map(p => (
                       <tr key={p.id}>
-                        <td>{formatDate(p.paidAt)}</td>
+                        <td>{p.paidAt ? formatDate(p.paidAt) : '—'}</td>
                         <td>{formatCurrency(p.amount)}</td>
                         <td>{p.method.replace('_', ' ')}</td>
                         <td>{p.paidBy}</td>
