@@ -75,3 +75,45 @@ PORT=5000
 ```
 NEXT_PUBLIC_API_URL=http://localhost:5000
 ```
+
+## Vercel Production Alignment
+
+The frontend and backend must be deployed as separate Vercel projects while
+using the same PostgreSQL database that Prisma Studio uses.
+
+### Backend Vercel project
+
+Set the project root to `backend` and configure these Production environment
+variables in Vercel:
+
+```
+DATABASE_URL=<the pooled connection for the same database used by Prisma Studio>
+DIRECT_DATABASE_URL=<the direct connection for that same database>
+JWT_SECRET=<the existing application JWT secret>
+JWT_EXPIRES_IN=7d
+FRONTEND_URL=https://brainecs-salam.vercel.app
+```
+
+Use `npm run build` as the build command. The backend URL is:
+
+```
+https://brainec-salam-bck.vercel.app
+```
+
+### Frontend Vercel project
+
+Set the project root to `frontend` and configure this Production environment
+variable:
+
+```
+NEXT_PUBLIC_API_URL=https://brainec-salam-bck.vercel.app
+```
+
+Do not add `/api` to this value. The frontend calls the backend routes
+directly, such as `/finance/summary` and `/archive/students/:id`.
+
+Deploy the backend first, then the frontend. After deployment, confirm the
+backend health endpoint responds at `/health`, then refresh Archive and
+Finance in the frontend. Both Vercel projects and Prisma Studio must reference
+the same database; otherwise the UI will show a different data state even
+when every individual request succeeds.
