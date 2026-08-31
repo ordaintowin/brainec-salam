@@ -46,6 +46,7 @@ export default function ArchivePage() {
   const [loading, setLoading] = useState(true);
   const [restoringId, setRestoringId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [deleteError, setDeleteError] = useState('');
   const [deleteTarget, setDeleteTarget] = useState<{
     type: 'student' | 'teacher';
     id: string;
@@ -113,16 +114,21 @@ export default function ArchivePage() {
     if (!deleteTarget) return;
 
     setDeletingId(deleteTarget.id);
+    setDeleteError('');
     try {
       await api.delete(`/archive/${deleteTarget.type}s/${deleteTarget.id}`);
-      if (deleteTarget.type === 'student') {
-        setArchivedStudents(prev => prev.filter(student => student.id !== deleteTarget.id));
-      } else {
-        setArchivedTeachers(prev => prev.filter(teacher => teacher.id !== deleteTarget.id));
-      }
       setDeleteTarget(null);
-    } catch {
-      // Keep the record visible if permanent deletion fails.
+      await fetchArchive();
+    } catch (error) {
+      const requestError = error as {
+        response?: { data?: { message?: string | string[] } };
+      };
+      const message = requestError?.response?.data?.message;
+      setDeleteError(
+        Array.isArray(message)
+          ? message.join(', ')
+          : message || 'Permanent deletion failed. The record was not removed.',
+      );
     } finally {
       setDeletingId(null);
     }
@@ -359,6 +365,7 @@ export default function ArchivePage() {
         confirmLabel="Delete Forever"
         confirmClassName="bg-red-600 hover:bg-red-700"
         isLoading={!!deletingId}
+        error={deleteError}
       />
     </div>
   );

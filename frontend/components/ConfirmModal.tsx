@@ -12,6 +12,7 @@ interface ConfirmModalProps {
   confirmLabel?: string;
   confirmClassName?: string;
   isLoading?: boolean;
+  error?: string;
 }
 
 export default function ConfirmModal({
@@ -26,6 +27,7 @@ export default function ConfirmModal({
   confirmLabel = 'Confirm',
   confirmClassName = 'bg-red-600 hover:bg-red-700',
   isLoading = false,
+  error = '',
 }: ConfirmModalProps) {
   if (!isOpen) return null;
 
@@ -48,6 +50,12 @@ export default function ConfirmModal({
               className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#16a34a] resize-none"
               placeholder="Enter reason for archiving…"
             />
+          </div>
+        )}
+
+        {error && (
+          <div className="mb-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+            {error}
           </div>
         )}
 

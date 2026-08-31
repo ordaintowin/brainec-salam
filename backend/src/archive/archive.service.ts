@@ -87,28 +87,41 @@ export class ArchiveService {
   }
 
   async deleteStudent(id: string) {
-    const student = await this.prisma.student.findUnique({
-      where: { id },
-      select: { id: true, isArchived: true },
-    });
-    if (!student || !student.isArchived) {
-      throw new NotFoundException('Archived student not found');
-    }
-
     await this.prisma.$transaction(async (tx) => {
+      // Recheck inside the transaction so a student restored while the
+      // confirmation request was in flight cannot be deleted accidentally.
+      const student = await tx.student.findUnique({
+        where: { id },
+        select: { id: true, isArchived: true },
+      });
+      if (!student || !student.isArchived) {
+        throw new NotFoundException('Archived student not found');
+      }
+
       const invoices = await tx.feeInvoice.findMany({
         where: { studentId: id },
         select: { id: true },
       });
       const invoiceIds = invoices.map((invoice) => invoice.id);
 
-      await tx.payment.deleteMany({ where: { studentId: id } });
-      if (invoiceIds.length > 0) {
-        await tx.payment.deleteMany({ where: { invoiceId: { in: invoiceIds } } });
-      }
+      // Payments have two foreign keys to the student data: studentId and
+      // invoiceId. Remove both possible shapes before removing invoices.
+      await tx.payment.deleteMany({
+        where: {
+          OR: [
+            { studentId: id },
+            { invoiceId: { in: invoiceIds } },
+          ],
+        },
+      });
       await tx.feeInvoice.deleteMany({ where: { studentId: id } });
       await tx.attendance.deleteMany({ where: { studentId: id } });
-      await tx.student.delete({ where: { id } });
+      const deleted = await tx.student.deleteMany({
+        where: { id, isArchived: true },
+      });
+      if (deleted.count !== 1) {
+        throw new NotFoundException('Archived student was changed before deletion');
+      }
     });
 
     return { id, deleted: true };
