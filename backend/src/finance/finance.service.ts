@@ -18,77 +18,62 @@ export class FinanceService {
   }
 
   /**
-   * Bring older records into the same state as records archived today.
-   * Invoices are retained for history, but invoices belonging to archived
-   * students must not remain active school-wide debt.
+   * Reconcile finance state from the source tables, not from denormalized
+   * invoice flags. Student archive state comes from students.isArchived and
+   * payment state comes from payments (with stored amountPaid retained only
+   * for legacy invoices that have no payment rows).
+   *
+   * Empty orders are deleted. Orders with historical invoices are retained,
+   * but archived when they have no active outstanding invoice.
    */
-  private async reconcileArchivedStudentInvoices(): Promise<void> {
-    const archivedInvoiceIds = await this.prisma.feeInvoice.findMany({
-      where: {
-        student: { isArchived: true },
-        isArchivedDebt: false,
-        debtCancelledAt: null,
-      },
-      select: { id: true },
-    });
+  private async reconcileFinanceState(): Promise<void> {
+    await this.prisma.$transaction(async (tx) => {
+      // Empty orders are not useful history and must never be represented as
+      // archived orders.
+      await tx.feeOrder.deleteMany({
+        where: { invoices: { none: {} } },
+      } as any);
 
-    if (archivedInvoiceIds.length > 0) {
-      await this.prisma.feeInvoice.updateMany({
-        where: { id: { in: archivedInvoiceIds.map((invoice) => invoice.id) } },
-        data: { isArchivedDebt: true },
-      });
-    }
-  }
-
-  /**
-   * Reconcile the fee-order archive flag from the same active invoice ledger
-   * used by reports. This repairs old orders lazily when finance is opened and
-   * avoids showing an order whose remaining invoices are already settled.
-   */
-  private async reconcileOpenFeeOrders(): Promise<void> {
-    await this.reconcileArchivedStudentInvoices();
-
-    // Empty orders are not useful history. Remove legacy empty orders before
-    // deciding which populated orders should be archived.
-    await this.prisma.feeOrder.deleteMany({
-      where: { invoices: { none: {} } },
-    } as any);
-
-    const orders = await this.prisma.feeOrder.findMany({
-      where: { isArchived: false } as any,
-      select: {
-        id: true,
-        _count: { select: { invoices: true } },
-        invoices: {
-          where: {
-            student: { isArchived: false },
-            isArchivedDebt: false,
-            debtCancelledAt: null,
-          },
-          select: {
-            amountDue: true,
-            amountPaid: true,
-            balance: true,
-            dueDate: true,
-            payments: { select: { amount: true } },
+      const orders = await tx.feeOrder.findMany({
+        select: {
+          id: true,
+          isArchived: true,
+          archivedAt: true,
+          invoices: {
+            select: {
+              amountDue: true,
+              amountPaid: true,
+              balance: true,
+              dueDate: true,
+              debtCancelledAt: true,
+              student: { select: { isArchived: true } },
+              payments: { select: { amount: true } },
+            },
           },
         },
-      },
-    });
-
-    const orderIdsToArchive = orders
-      .filter((order) => {
-        if (order.invoices.length === 0) return true;
-        return order.invoices.every((invoice) => this.getInvoiceLedger(invoice).balance <= FLOAT_EPSILON);
-      })
-      .map((order) => order.id);
-
-    if (orderIdsToArchive.length > 0) {
-      await this.prisma.feeOrder.updateMany({
-        where: { id: { in: orderIdsToArchive }, isArchived: false } as any,
-        data: { isArchived: true, archivedAt: new Date() } as any,
       });
-    }
+
+      for (const order of orders) {
+        const hasActiveOutstandingInvoice = order.invoices.some((invoice) => (
+          !invoice.student.isArchived &&
+          !invoice.debtCancelledAt &&
+          this.getInvoiceLedger(invoice).balance > FLOAT_EPSILON
+        ));
+        const shouldArchive = !hasActiveOutstandingInvoice;
+
+        if (shouldArchive && (!order.isArchived || !order.archivedAt)) {
+          await tx.feeOrder.update({
+            where: { id: order.id },
+            data: { isArchived: true, archivedAt: new Date() } as any,
+          });
+        } else if (!shouldArchive && (order.isArchived || order.archivedAt)) {
+          await tx.feeOrder.update({
+            where: { id: order.id },
+            data: { isArchived: false, archivedAt: null } as any,
+          });
+        }
+      }
+    });
   }
 
   async createFeeOrder(dto: CreateFeeOrderDto, createdById: string) {
@@ -193,7 +178,7 @@ export class FinanceService {
   }
 
   async getFeeOrders(page = 1, limit = 10, q?: string) {
-    await this.reconcileOpenFeeOrders();
+    await this.reconcileFinanceState();
     const skip = (page - 1) * limit;
     const where: any = { isArchived: false };
 
@@ -222,7 +207,6 @@ export class FinanceService {
           invoices: {
             where: {
               student: { isArchived: false },
-              isArchivedDebt: false,
               debtCancelledAt: null,
             },
             select: {
@@ -371,13 +355,12 @@ export class FinanceService {
     // Repair legacy archived-student invoices before loading the active list.
     // This also archives fee orders that no longer have active outstanding
     // invoices.
-    await this.reconcileOpenFeeOrders();
+    await this.reconcileFinanceState();
 
     const skip = (page - 1) * limit;
     const where: any = {
       student: { isArchived: false },
       feeOrder: { isArchived: false },
-      isArchivedDebt: false,
       debtCancelledAt: null,
     };
 
@@ -548,7 +531,6 @@ export class FinanceService {
       where: {
         feeOrderId: invoice.feeOrderId,
         student: { isArchived: false },
-        isArchivedDebt: false,
         debtCancelledAt: null,
       },
       select: {
@@ -586,7 +568,6 @@ export class FinanceService {
       where: {
         feeOrderId,
         student: { isArchived: false },
-        isArchivedDebt: false,
         debtCancelledAt: null,
       },
       select: {
@@ -829,7 +810,6 @@ export class FinanceService {
         // invoice history on their own profile, but must not contribute to
         // fee-order details or debtor totals.
         student: { isArchived: false },
-        isArchivedDebt: false,
         debtCancelledAt: null,
       },
       include: {
@@ -924,13 +904,12 @@ export class FinanceService {
   }
 
   async getSummary() {
-    await this.reconcileOpenFeeOrders();
+    await this.reconcileFinanceState();
     const [invoices, classes, feeOrders] = await Promise.all([
       this.prisma.feeInvoice.findMany({
         where: {
           feeOrder: { isArchived: false } as any,
           student: { isArchived: false },
-          isArchivedDebt: false,
           debtCancelledAt: null,
         },
         select: {
@@ -1087,7 +1066,7 @@ export class FinanceService {
         dueDate: true,
         payments: { select: { amount: true } },
         debtCancelledAt: true,
-        isArchivedDebt: true,
+        student: { select: { isArchived: true } },
       },
     });
 
@@ -1095,7 +1074,7 @@ export class FinanceService {
     if (invoice.debtCancelledAt) {
       throw new BadRequestException('This debt has already been cancelled');
     }
-    if (!invoice.isArchivedDebt) {
+    if (!invoice.student.isArchived) {
       throw new BadRequestException('Only archived student debt can be cancelled');
     }
     if (this.getInvoiceLedger(invoice).balance <= FLOAT_EPSILON) {
@@ -1112,11 +1091,9 @@ export class FinanceService {
   }
 
   async getArchivedFeeOrders(page = 1, limit = 10, q?: string) {
-    // Also clean empty archived records when the Archives tab is opened
-    // directly, without relying on another finance endpoint first.
-    await this.prisma.feeOrder.deleteMany({
-      where: { invoices: { none: {} } },
-    } as any);
+    // Reconcile first so stale open orders and empty archived orders cannot
+    // leak into the Archives tab.
+    await this.reconcileFinanceState();
 
     const skip = (page - 1) * limit;
     const where: any = { isArchived: true };

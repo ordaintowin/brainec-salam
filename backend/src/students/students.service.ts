@@ -198,7 +198,6 @@ export class StudentsService {
         where: {
           feeOrderId,
           student: { isArchived: false },
-          isArchivedDebt: false,
           debtCancelledAt: null,
         },
         select: {

@@ -25,7 +25,6 @@ export class DashboardService {
         where: {
           student: { isArchived: false },
           feeOrder: { isArchived: false } as any,
-          isArchivedDebt: false,
           debtCancelledAt: null,
         },
         select: {
