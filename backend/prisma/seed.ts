@@ -19,13 +19,40 @@ async function main() {
   }
   console.log('✅ Classes initialized');
 
+  const legacyHeadmistressEmail = 'headmistress@brainec-salam.edu.gh';
+  const headmistressEmail = 'superadmin@bs.com';
+  const existingHeadmistress = await prisma.user.findFirst({
+    where: {
+      role: 'HEADMISTRESS',
+      email: { equals: legacyHeadmistressEmail, mode: 'insensitive' },
+    },
+  });
+  const existingSuperadmin = await prisma.user.findUnique({
+    where: { email: headmistressEmail },
+  });
+
+  if (existingHeadmistress && !existingSuperadmin) {
+    await prisma.user.update({
+      where: { id: existingHeadmistress.id },
+      data: { email: headmistressEmail },
+    });
+  } else if (
+    existingHeadmistress &&
+    existingSuperadmin &&
+    existingHeadmistress.id !== existingSuperadmin.id
+  ) {
+    throw new Error(
+      `Cannot rename ${legacyHeadmistressEmail}: ${headmistressEmail} is already assigned to another user`,
+    );
+  }
+
   const headPassword = await bcrypt.hash('Admin@1234', 10);
   await prisma.user.upsert({
-    where: { email: 'headmistress@brainec-salam.edu.gh' },
+    where: { email: headmistressEmail },
     update: {},
     create: {
       name: 'Mrs. Headmistress',
-      email: 'headmistress@brainec-salam.edu.gh',
+      email: headmistressEmail,
       password: headPassword,
       role: 'HEADMISTRESS',
     },

@@ -34,11 +34,11 @@ async function main() {
   // 2. Setup Headmistress
   const headPassword = await bcrypt.hash('Admin@1234', 10);
   await prisma.user.upsert({
-    where: { email: 'headmistress@brainec-salam.edu.gh' },
+    where: { email: 'superadmin@bs.com' },
     update: {},
     create: {
       name: 'Mrs. Headmistress',
-      email: 'headmistress@brainec-salam.edu.gh',
+      email: 'superadmin@bs.com',
       password: headPassword,
       role: 'HEADMISTRESS',
     },
