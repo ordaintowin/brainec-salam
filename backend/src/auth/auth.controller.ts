@@ -18,14 +18,14 @@ export class AuthController {
   ) {
     const result = await this.authService.login(dto.email, dto.password);
 
-    // The frontend proxies /api to this service in the Replit preview, so the
-    // cookie is same-site. Use secure cookies only when the app is deployed
-    // over HTTPS; this also keeps local preview login usable.
+    // Vercel frontend and backend use different domains, so production needs a
+    // cross-site cookie. Replit's local proxy is same-site and does not use
+    // HTTPS, so keep the local cookie compatible with the preview.
     const isProduction = process.env.NODE_ENV === 'production';
     res.cookie('access_token', result.access_token, {
       httpOnly: true,
       secure: isProduction,
-      sameSite: 'lax',
+      sameSite: isProduction ? 'none' : 'lax',
       maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
       path: '/',         // Ensure cookie is available for all routes
     });
@@ -40,7 +40,7 @@ export class AuthController {
     res.clearCookie('access_token', {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
-      sameSite: 'lax',
+      sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
       path: '/',
     });
     return { message: 'Logged out successfully' };
